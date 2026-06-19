@@ -73,6 +73,7 @@ def prepare_profile(config):
     config.openclaw_config_path.write_text(
         json.dumps(openclaw_config(config, {})), encoding="utf-8"
     )
+    config.openclaw_config_path.chmod(0o600)
     auth = config.state_dir / "agents" / "main" / "agent"
     auth.mkdir(parents=True)
     (auth / "auth-profiles.json").write_text(
