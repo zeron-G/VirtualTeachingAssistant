@@ -169,9 +169,9 @@ export class ModelRouter {
    * `LlmUnavailableError` carrying both causes.
    */
   async completeWithFailover(
+    req: LlmRequest,
     primary: LlmRole = 'agent.primary',
     fallback: LlmRole = 'agent.fallback',
-    req: LlmRequest,
   ): Promise<LlmResult> {
     try {
       return await this.complete(primary, req);

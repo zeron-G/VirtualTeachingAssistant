@@ -11,7 +11,14 @@
  */
 
 // Core wire types
-export type { LlmMessage, LlmRequest, Usage, LlmResult } from './types.js';
+export type {
+  LlmMessage,
+  LlmRequest,
+  Usage,
+  LlmResult,
+  LlmTool,
+  LlmToolCall,
+} from './types.js';
 
 // Capability interfaces
 export type { LlmProvider, Embedder, Reranker } from './provider.js';

@@ -1,0 +1,26 @@
+{
+  "name": "@vta/discord-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js",
+    "dev": "tsx src/main.ts",
+    "clean": "rimraf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@vta/core": "workspace:*",
+    "@vta/tenancy": "workspace:*",
+    "@vta/data": "workspace:*",
+    "@vta/shared": "workspace:*",
+    "@vta/llm": "workspace:*",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "rimraf": "^6.1.3"
+  }
+}

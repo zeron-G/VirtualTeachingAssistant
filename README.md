@@ -1,10 +1,12 @@
 # Virtual Teaching Assistant (VTA)
 
-> **Status: Phase 0 (foundations) — not in production.**
-> The current tree contains scaffolding only: the monorepo, shared types, the
-> data schema, the LLM role layer, local infrastructure, CI, and an eval
-> skeleton. Phase-1 business logic (governance rules, RAG retrieval, channel
-> adapters, the agent loop) is **not** implemented yet.
+> **Status: Phase 1 code-complete & build-green — NOT yet runnable end-to-end. Not in production.**
+> All Phase-1 packages (governance, RAG, agent + Codex fallback, core orchestrator)
+> and the Discord adapter are implemented and a clean-room build passes
+> (install/build/typecheck/lint). A completeness audit found **2 integration
+> blockers** (Discord-id→user-UUID mapping; no ingestion/seed entrypoint) plus
+> gaps and zero automated tests — these are being closed in **Wave 7**.
+> See [`docs/PHASE-1-STATUS.md`](./docs/PHASE-1-STATUS.md) for the full audit and plan.
 
 The Virtual Teaching Assistant is a **governed, multi-tenant course Q&A
 assistant**. It answers student questions about a specific course by embedding

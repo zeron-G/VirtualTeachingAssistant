@@ -1,0 +1,32 @@
+{
+  "name": "@vta/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rimraf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@vta/shared": "workspace:*",
+    "@vta/llm": "workspace:*",
+    "@vta/tools": "workspace:*",
+    "@vta/governance": "workspace:*",
+    "@vta/rag": "workspace:*",
+    "@vta/audit": "workspace:*",
+    "zod": "^3.24.1",
+    "zod-to-json-schema": "^3.24.5"
+  },
+  "devDependencies": {
+    "rimraf": "^6.1.3"
+  }
+}
