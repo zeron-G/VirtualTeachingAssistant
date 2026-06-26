@@ -1,0 +1,61 @@
+# Local development infrastructure for the Virtual Teaching Assistant (VTA).
+#
+# Two services are provided for local dev:
+#   - postgres: PostgreSQL 16 with the pgvector extension (RAG embeddings).
+#   - redis:    Redis 7 (BullMQ job queues / ephemeral state).
+#
+# Usage:
+#   docker compose up -d        # start both services in the background
+#   docker compose ps           # check status / health
+#   docker compose down         # stop services (data persists in named volumes)
+#   docker compose down -v      # stop services AND delete the named volumes
+#
+# NOTE: The obsolete top-level "version" key is intentionally omitted; the
+# current Compose Specification no longer requires (or recommends) it.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: vta-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: vta
+      POSTGRES_PASSWORD: vta
+      POSTGRES_DB: vta
+    volumes:
+      # Persistent data directory.
+      - vta-pgdata:/var/lib/postgresql/data
+      # Initialization script: runs ONLY on first cluster creation (empty volume).
+      # Enables the pgvector extension required for RAG embeddings.
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      # pg_isready confirms the server is accepting connections.
+      test: ["CMD-SHELL", "pg_isready -U vta -d vta"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: vta-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      # Persistent append-only data directory.
+      - vta-redisdata:/data
+    healthcheck:
+      # redis-cli ping returns PONG when the server is ready.
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+# Named volumes keep data between `docker compose up`/`down` cycles.
+volumes:
+  vta-pgdata:
+  vta-redisdata:

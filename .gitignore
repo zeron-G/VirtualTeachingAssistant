@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# turbo / caches
+.turbo/
+coverage/
+
+# env & secrets — never commit
+.env
+.env.*
+!.env.example
+
+# local data / runtime
+*.log
+.DS_Store
+Thumbs.db
+
+# editor
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# drizzle local artifacts
+packages/data/drizzle/meta/_journal.json.bak

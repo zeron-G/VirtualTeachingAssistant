@@ -1,0 +1,15 @@
+-- Virtual Teaching Assistant (VTA) — PostgreSQL initialization script.
+--
+-- This file is mounted into the official Postgres image at
+--   /docker-entrypoint-initdb.d/init.sql
+-- and is executed automatically the FIRST time the database cluster is
+-- created (i.e. when the vta-pgdata volume is empty). It is NOT re-run on
+-- subsequent container starts. To re-run it, recreate the volume:
+--   docker compose down -v && docker compose up -d
+--
+-- pgvector provides the `vector` column type and similarity operators used
+-- by the RAG (Retrieval-Augmented Generation) pipeline to store and search
+-- document/chunk embeddings for course Q&A. The base image
+-- (pgvector/pgvector:pg16) ships the extension binaries; this statement
+-- activates the extension inside the `vta` database.
+CREATE EXTENSION IF NOT EXISTS vector;
