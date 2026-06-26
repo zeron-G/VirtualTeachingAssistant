@@ -38,13 +38,23 @@ export class MaterialRepository {
 
     const values: NewMaterialRow = { ...input, courseId };
 
+    // Idempotent on (course_id, source_type, external_id) — see the unique index
+    // in schema/materials.ts. Re-syncing the same source reuses the SAME row id,
+    // so its chunks (keyed by material_id) are never orphaned and rows do not
+    // accumulate across syncs.
     const rows = await this.db
       .insert(materials)
       .values(values)
-      // TODO(phase-1): add a unique constraint on (course_id, source_type,
-      // external_id) in a migration so this upsert can dedupe Canvas syncs.
-      // Until that constraint exists, onConflict cannot target those columns,
-      // so we insert and rely on the ingestion layer for idempotency.
+      .onConflictDoUpdate({
+        target: [materials.courseId, materials.sourceType, materials.externalId],
+        set: {
+          title: values.title,
+          kind: values.kind,
+          contentHash: values.contentHash,
+          uri: values.uri ?? null,
+          updatedAt: new Date(),
+        },
+      })
       .returning();
 
     const row = rows[0];
@@ -63,6 +73,31 @@ export class MaterialRepository {
       .select()
       .from(materials)
       .where(and(eq(materials.id, materialId), eq(materials.courseId, courseId)))
+      .limit(1);
+    return rows[0];
+  }
+
+  /**
+   * Fetch the single material for a source key, scoped to a course. With the
+   * unique index on (course_id, source_type, external_id) there is at most one.
+   * Used by ingestion to detect change (compare stored contentHash) and to reuse
+   * the stable row id across re-syncs.
+   */
+  async findByExternalKey(
+    courseId: CourseId,
+    sourceType: string,
+    externalId: string,
+  ): Promise<MaterialRow | undefined> {
+    const rows = await this.db
+      .select()
+      .from(materials)
+      .where(
+        and(
+          eq(materials.courseId, courseId),
+          eq(materials.sourceType, sourceType),
+          eq(materials.externalId, externalId),
+        ),
+      )
       .limit(1);
     return rows[0];
   }

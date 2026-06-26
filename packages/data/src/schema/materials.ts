@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, vector } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, timestamp, vector, uniqueIndex } from "drizzle-orm/pg-core";
 import { courses } from "./courses.js";
 
 /**
@@ -25,7 +25,18 @@ export const materials = pgTable("materials", {
   /** Canonical location of the source, if any (URL / storage uri). */
   uri: text("uri"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  // Idempotent ingestion: at most one material row per (course, source, external
+  // id). Lets `upsertMaterial`'s ON CONFLICT reuse the same row across re-syncs,
+  // so chunks (keyed by material_id) never orphan and rows never accumulate.
+  // Rows with a NULL externalId (ad-hoc uploads) are exempt — Postgres treats
+  // NULLs as distinct, so they simply always insert.
+  uniqueIndex("materials_course_source_external_uq").on(
+    t.courseId,
+    t.sourceType,
+    t.externalId,
+  ),
+]);
 
 export type MaterialRow = typeof materials.$inferSelect;
 export type NewMaterialRow = typeof materials.$inferInsert;
