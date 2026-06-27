@@ -1,0 +1,27 @@
+# Build context excludes — keep the image build clean and reproducible.
+# Everything here is regenerated inside the image (install + build), so shipping
+# the host's copies would only invalidate caches and risk stale artifacts.
+
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/.turbo
+.turbo
+**/coverage
+coverage
+
+# VCS + local tooling
+.git
+.gitignore
+
+# Secrets / local env — NEVER bake into an image. (.env.example is harmless but
+# unused at build time.)
+.env
+.env.*
+
+# Misc local noise
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
