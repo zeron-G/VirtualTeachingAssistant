@@ -1,0 +1,112 @@
+name: build-and-deploy
+
+# CI/CD for the Discord worker.
+#
+# WHY THIS SHAPE: this Azure subscription's tenant blocks both service-principal
+# creation AND role assignments for the current user, and the subscription blocks
+# ACR Tasks (server-side `az acr build`). So:
+#   - BUILD happens here on GitHub's runners (no dependency on a local Docker
+#     Desktop), pushing to ACR with the registry's admin credentials (data-plane
+#     only — needs no Azure AD identity).
+#   - DEPLOY (rolling the Container App to the new image) needs an Azure
+#     management identity. A user-assigned managed identity (`vta-github-deploy`)
+#     is already federated with this repo for OIDC, but it cannot be GRANTED a
+#     role until a subscription Owner runs one `az role assignment create`
+#     (see scripts/deploy.ps1 header). Until then the deploy job is SKIPPED
+#     (guarded by the AUTO_DEPLOY repo variable) and the rollout is a one-line
+#     local command (scripts/deploy.ps1) under your own az login.
+#
+# To turn on fully-automatic deploys once the MI has a role:
+#   gh variable set AUTO_DEPLOY -R zeron-G/VirtualTeachingAssistant --body true
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - 'turbo.json'
+      - 'tsconfig*.json'
+      - '.dockerignore'
+      - '.github/workflows/build-and-deploy.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: build-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: vtaacri35td7bkyqi2a.azurecr.io
+  IMAGE: vta-discord-worker
+  RESOURCE_GROUP: VirtualTeachingAssistant
+  CONTAINER_APP: vta-discord-worker
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/discord-worker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "### :rocket: Image pushed to ACR"
+            echo ""
+            echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}\`"
+            echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE }}:latest\`"
+            echo ""
+            echo "Roll it out (no Docker needed): \`pwsh scripts/deploy.ps1\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: build-push
+    runs-on: ubuntu-latest
+    # SKIPPED until a subscription Owner grants the managed identity a role and
+    # AUTO_DEPLOY is flipped to "true". See the file header.
+    if: ${{ vars.AUTO_DEPLOY == 'true' }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Azure login (OIDC, user-assigned managed identity)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Roll Container App to the new image
+        uses: azure/cli@v2
+        with:
+          azcliversion: latest
+          inlineScript: |
+            az containerapp update \
+              -n "${{ env.CONTAINER_APP }}" \
+              -g "${{ env.RESOURCE_GROUP }}" \
+              --image "${{ needs.build-push.outputs.image }}"
