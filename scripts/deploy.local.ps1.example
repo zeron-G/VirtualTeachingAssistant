@@ -7,6 +7,7 @@ $env:VTA_ACR_LOGIN_SERVER = "<your-registry>.azurecr.io"
 $env:VTA_IMAGE_NAME       = "<image-name>"          # the worker image repository
 $env:VTA_RESOURCE_GROUP   = "<your-resource-group>"
 $env:VTA_CONTAINER_APP    = "<your-container-app>"
+$env:VTA_POSTGRES_SERVER  = "<your-postgres-server>"   # for scripts/pause.ps1 + resume.ps1
 
 # -----------------------------------------------------------------------------
 # Optional: enable fully-automatic CI deploys (run ONCE, by a subscription Owner).

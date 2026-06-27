@@ -406,9 +406,9 @@ node apps/admin/dist/main.js course:list
 
 ## Deployment (Azure)
 
-Everything lives in one resource group, **`VirtualTeachingAssistant`**. The
-runtime is a single always-on Container App (a persistent Discord gateway client,
-so exactly one replica and no HTTP ingress).
+Everything lives in a single resource group. The runtime is one always-on
+Container App (a persistent Discord gateway client, so exactly one replica and no
+HTTP ingress).
 
 ```mermaid
 flowchart LR
@@ -454,6 +454,37 @@ are baked in and worth knowing:
 
 Secrets are stored as **Container App secrets** (encrypted, never in the image or
 git) and referenced as env vars; `SECRETS_PROVIDER=env`.
+
+### What runs, and what it costs
+
+Five resources make up the deployment; only three carry a meaningful ongoing cost:
+
+| Resource type | Billing model | Ongoing cost |
+| --- | --- | --- |
+| **Postgres Flexible Server** | compute billed **per hour while running** + storage | the largest variable cost; **stop** it to drop to storage-only |
+| **Container App** (always-on worker) | billed per **replica running-time** | a small ongoing cost while a replica is up; **scale to 0** for ≈ none |
+| **Container Registry** (Basic) | small **flat** fee; cannot be paused | minor, constant |
+| Container Apps Environment (Consumption) | billed via its apps' usage; no fixed fee | ≈ none when the app is scaled to 0 |
+| Managed identity | free | none |
+
+(Exact figures depend on region/contract; the relative sizes above are what
+matter. No log-analytics workspace is provisioned, so there's no telemetry cost.)
+
+### Pausing when idle (reversible)
+
+When the assistant isn't needed, pause the two compute resources to minimize
+spend — no data or configuration is lost:
+
+```powershell
+pwsh scripts/pause.ps1     # worker -> 0 replicas (bot offline) + stop Postgres compute
+pwsh scripts/resume.ps1    # start Postgres + worker -> 1 replica (bot back in ~30s)
+```
+
+These read your resource names from the gitignored `scripts/deploy.local.ps1`.
+Equivalent raw commands: `az containerapp update --min-replicas 0` and
+`az postgres flexible-server stop` (resume with `--min-replicas 1` /
+`flexible-server start`). Note: a **stopped** Postgres Flexible Server is
+auto-started by Azure after ~7 days — re-run `pause.ps1` to keep it paused.
 
 ---
 
