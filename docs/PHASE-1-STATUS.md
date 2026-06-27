@@ -1,5 +1,9 @@
 # Phase 1 — Status, Audit & Next Steps
 
+> ⚠️ **Historical snapshot.** This captured the mid-Phase-1 audit. The system has
+> since shipped and is **live on Azure**. For the current architecture, deployment,
+> and status, see [`README.md`](../README.md) and [`ARCHITECTURE.md`](../ARCHITECTURE.md).
+
 _Last updated: 2026-06-26 · branch `phase-1` (not yet merged to `main`)_
 
 ## TL;DR

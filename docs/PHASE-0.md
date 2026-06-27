@@ -1,5 +1,8 @@
 # Phase 0 — Foundations
 
+> ⚠️ **Historical.** Describes the original Phase-0 scaffold. For the current
+> system see [`README.md`](../README.md) and [`ARCHITECTURE.md`](../ARCHITECTURE.md).
+
 Phase 0 establishes the foundations the rest of the Virtual Teaching Assistant
 is built on. It contains **no business logic** — no governance rules, no RAG
 retrieval, no Discord integration, no agent loop. The goal is a clean, fully
