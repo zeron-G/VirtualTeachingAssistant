@@ -34,7 +34,7 @@ abstract class BaseSecretsProvider implements SecretsProvider {
 /**
  * Environment-backed provider for local development.
  * Secret names are upper-cased and dots/dashes become underscores, so
- * `canvas.token.ai-essentials` reads `CANVAS_TOKEN_AI_ESSENTIALS`.
+ * `canvas.token.cs101` reads `CANVAS_TOKEN_CS101`.
  */
 export class EnvSecretsProvider extends BaseSecretsProvider {
   constructor(private readonly env: NodeJS.ProcessEnv = process.env) {

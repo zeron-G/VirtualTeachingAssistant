@@ -2,22 +2,23 @@ name: build-and-deploy
 
 # CI/CD for the Discord worker.
 #
-# WHY THIS SHAPE: this Azure subscription's tenant blocks both service-principal
-# creation AND role assignments for the current user, and the subscription blocks
-# ACR Tasks (server-side `az acr build`). So:
-#   - BUILD happens here on GitHub's runners (no dependency on a local Docker
-#     Desktop), pushing to ACR with the registry's admin credentials (data-plane
-#     only — needs no Azure AD identity).
+# WHY THIS SHAPE: on some Azure tenants the account cannot create a service
+# principal OR assign roles, and the subscription may block ACR Tasks
+# (server-side `az acr build`). So:
+#   - BUILD happens here on GitHub's runners (no local Docker dependency), pushing
+#     to the registry with its admin credentials (data-plane only, no Azure AD).
 #   - DEPLOY (rolling the Container App to the new image) needs an Azure
-#     management identity. A user-assigned managed identity (`vta-github-deploy`)
-#     is already federated with this repo for OIDC, but it cannot be GRANTED a
-#     role until a subscription Owner runs one `az role assignment create`
-#     (see scripts/deploy.ps1 header). Until then the deploy job is SKIPPED
-#     (guarded by the AUTO_DEPLOY repo variable) and the rollout is a one-line
-#     local command (scripts/deploy.ps1) under your own az login.
+#     management identity (a federated user-assigned managed identity via OIDC).
+#     Until that identity is granted a role by a subscription Owner, the deploy
+#     job is SKIPPED (guarded by the AUTO_DEPLOY repo variable) and rollout is a
+#     one-line local command (scripts/deploy.ps1) under your own az login.
 #
-# To turn on fully-automatic deploys once the MI has a role:
-#   gh variable set AUTO_DEPLOY -R zeron-G/VirtualTeachingAssistant --body true
+# All environment-specific values come from repo VARIABLES/SECRETS, never the
+# source. Required repo variables: ACR_LOGIN_SERVER, IMAGE_NAME,
+# AZURE_RESOURCE_GROUP, CONTAINER_APP_NAME (+ AZURE_CLIENT_ID / AZURE_TENANT_ID /
+# AZURE_SUBSCRIPTION_ID for the deploy job). Required secrets: ACR_USERNAME,
+# ACR_PASSWORD. To enable auto-deploy once the identity has a role:
+#   gh variable set AUTO_DEPLOY --body true
 
 on:
   push:
@@ -38,10 +39,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  REGISTRY: vtaacri35td7bkyqi2a.azurecr.io
-  IMAGE: vta-discord-worker
-  RESOURCE_GROUP: VirtualTeachingAssistant
-  CONTAINER_APP: vta-discord-worker
+  REGISTRY: ${{ vars.ACR_LOGIN_SERVER }}
+  IMAGE: ${{ vars.IMAGE_NAME }}
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  CONTAINER_APP: ${{ vars.CONTAINER_APP_NAME }}
 
 jobs:
   build-push:

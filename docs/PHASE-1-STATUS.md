@@ -87,7 +87,7 @@ zero call sites). The only app, `apps/discord-worker`, wires only the *answer* p
 fresh DB, `courses`/`course_config`/`chunks` are empty, so `CourseResolver.resolveByChannel`
 returns `null` for every message and it is silently dropped.
 _Fix:_ add an admin CLI (`apps/admin` or `scripts/`) to create a course, map its Discord
-channels, set roles (e.g. Gordon Gao = admin), and run `ingestCourse(courseId, canvasCourseId)`.
+channels, set roles (e.g. the professor = admin), and run `ingestCourse(courseId, canvasCourseId)`.
 
 ### 🟠 Gaps — works but weak; address in Wave 7 or note explicitly
 
@@ -146,7 +146,7 @@ Ordered so each step unblocks the next; target = a live end-to-end smoke test on
 
 Then: clean-room rebuild + a **local end-to-end smoke test** (Postgres up, seed one course,
 verify a real question round-trips through ingress→agent→egress→audit) → merge `phase-1` → `main`
-→ pilot on AI Essentials.
+→ pilot on the first course.
 
 ---
 

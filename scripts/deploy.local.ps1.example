@@ -1,0 +1,21 @@
+# Local deploy config — copy to `scripts/deploy.local.ps1` (gitignored) and fill in.
+#
+# These are NON-secret Azure resource identifiers, deliberately kept OUT of the
+# public repo. `scripts/deploy.ps1` dot-sources the copy you create.
+
+$env:VTA_ACR_LOGIN_SERVER = "<your-registry>.azurecr.io"
+$env:VTA_IMAGE_NAME       = "<image-name>"          # the worker image repository
+$env:VTA_RESOURCE_GROUP   = "<your-resource-group>"
+$env:VTA_CONTAINER_APP    = "<your-container-app>"
+
+# -----------------------------------------------------------------------------
+# Optional: enable fully-automatic CI deploys (run ONCE, by a subscription Owner).
+# CI already builds & pushes images; this lets the CI deploy job roll them out.
+#
+#   az role assignment create `
+#     --assignee <managed-identity-principal-id> `
+#     --role Contributor `
+#     --scope /subscriptions/<subscription-id>/resourceGroups/<your-resource-group>
+#
+#   gh variable set AUTO_DEPLOY --body true
+# -----------------------------------------------------------------------------

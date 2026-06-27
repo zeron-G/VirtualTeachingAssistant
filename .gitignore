@@ -15,6 +15,9 @@ coverage/
 .env.*
 !.env.example
 
+# local deploy config (real Azure resource names) — keep out of the public repo
+scripts/deploy.local.ps1
+
 # local data / runtime
 *.log
 .DS_Store

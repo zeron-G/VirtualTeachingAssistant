@@ -51,12 +51,12 @@ process environment is already populated.
 | `OPENAI_API_KEY` | for `course:ingest` | Resolved as `openai.api-key` for embeddings. |
 
 Secret-name mangling follows the `@vta/shared` env provider convention:
-`canvas.token.ai-essentials` reads `CANVAS_TOKEN_AI_ESSENTIALS`.
+`canvas.token.cs101` reads `CANVAS_TOKEN_CS101`.
 
-## End-to-end: onboarding the AI Essentials pilot
+## End-to-end: onboarding a course
 
-A complete onboarding for the pilot course, end to end. Replace the Canvas
-course id, Discord ids, and token with the real values.
+A complete onboarding for a course, end to end. Replace the slug, course name,
+Canvas course id, Discord ids, and token with the real values (examples below).
 
 ```bash
 # 0. .env (local development)
@@ -64,35 +64,35 @@ cat > .env <<'EOF'
 DATABASE_URL=postgres://vta:vta@localhost:5432/vta
 LLM_PROFILE=dev
 SECRETS_PROVIDER=env
-# Per-course Canvas token: slug "ai-essentials" -> CANVAS_TOKEN_AI_ESSENTIALS
-CANVAS_TOKEN_AI_ESSENTIALS=canvas_pat_xxx
-# Optional per-course Canvas base URL: slug -> CANVAS_BASEURL_AI_ESSENTIALS
-CANVAS_BASEURL_AI_ESSENTIALS=https://jhu.instructure.com
+# Per-course Canvas token: slug "cs101" -> CANVAS_TOKEN_CS101
+CANVAS_TOKEN_CS101=canvas_pat_xxx
+# Optional per-course Canvas base URL: slug -> CANVAS_BASEURL_CS101
+CANVAS_BASEURL_CS101=https://<your-institution>.instructure.com
 # Embeddings key (resolved as openai.api-key)
 OPENAI_API_KEY=sk-xxx
 EOF
 
 # 1. Register the course (Canvas course id 220123 is an example).
 pnpm --filter @vta/admin dev -- course:add \
-  --slug ai-essentials \
-  --name "AI Essentials" \
+  --slug cs101 \
+  --name "Intro to Computer Science" \
   --canvas-id 220123
 
 # 2. Route the course's Discord channel to it.
 pnpm --filter @vta/admin dev -- course:map-channel \
-  --slug ai-essentials \
+  --slug cs101 \
   --channel 112233445566778899 \
   --guild 998877665544332211
 
-# 3. Make Gordon Gao the course admin (professor).
+# 3. Make the professor the course admin.
 pnpm --filter @vta/admin dev -- course:set-role \
-  --slug ai-essentials \
+  --slug cs101 \
   --discord-id 123456789012345678 \
   --role admin \
-  --name "Gordon Gao"
+  --name "Jane Doe"
 
 # 4. Ingest the course's Canvas material into retrievable chunks.
-pnpm --filter @vta/admin dev -- course:ingest --slug ai-essentials
+pnpm --filter @vta/admin dev -- course:ingest --slug cs101
 
 # 5. Verify it landed.
 pnpm --filter @vta/admin dev -- course:list

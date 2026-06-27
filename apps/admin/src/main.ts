@@ -311,7 +311,7 @@ Required environment:
   DATABASE_URL          Postgres (pgvector) connection string.
   LLM_PROFILE           dev | prod (default dev). Drives the embed model on ingest.
   SECRETS_PROVIDER      env | keyvault (default env).
-  CANVAS_TOKEN_<SLUG>   Per-course Canvas API token (e.g. CANVAS_TOKEN_AI_ESSENTIALS).
+  CANVAS_TOKEN_<SLUG>   Per-course Canvas API token (e.g. CANVAS_TOKEN_CS101).
   CANVAS_BASEURL_<SLUG> Optional per-course Canvas base URL override.
   OPENAI_API_KEY        Resolved as openai.api-key for embeddings during ingest.
 `;

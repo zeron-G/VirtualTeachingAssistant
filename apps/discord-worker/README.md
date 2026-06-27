@@ -44,7 +44,7 @@ governance.
 
 With `SECRETS_PROVIDER=env`, secret names are upper-cased with dots/dashes
 turned into underscores. So `discord.bot-token` is read from `DISCORD_BOT_TOKEN`,
-and `canvas.token.ai-essentials` from `CANVAS_TOKEN_AI_ESSENTIALS`.
+and `canvas.token.cs101` from `CANVAS_TOKEN_CS101`.
 
 Config is loaded from a local `.env` file (via `dotenv`) when present; in
 production the process environment is expected to be populated already.

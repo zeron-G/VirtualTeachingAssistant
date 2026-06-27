@@ -5,10 +5,10 @@
 > that course's own materials, behind a structural governance layer that controls
 > what the assistant may **read, do, and say**.
 
-**Status (2026-06):** 🟢 **Live on Azure.** The Discord bot is deployed and
-answering. Pilot course: **AI Essentials for Business** (Canvas `134734`), taught
-by **Prof. Gordon Gao**. Course-material ingestion (Canvas) and a few enhancements
-are the remaining work — see [Status & roadmap](#status--roadmap).
+**Status:** Deployed on Azure and answering on Discord, currently piloting with a
+single course (the design is multi-tenant — more courses/instructors to follow).
+Course-material ingestion and a few enhancements remain — see
+[Status & roadmap](#status--roadmap).
 
 ---
 
@@ -381,25 +381,25 @@ To run the worker against the database: `pnpm --filter @vta/discord-worker dev`.
 ```bash
 # Register / refresh a course (re-running RESETS its config + channel map).
 node apps/admin/dist/main.js course:add \
-  --slug ai-essentials --name "AI Essentials for Business" --canvas-id 134734
+  --slug cs101 --name "Intro to Computer Science" --canvas-id <canvas-course-id>
 
 # Bind a Discord channel to the course (the bot only answers in mapped channels).
 node apps/admin/dist/main.js course:map-channel \
-  --slug ai-essentials --channel <discordChannelId> [--guild <id>]
+  --slug cs101 --channel <discordChannelId> [--guild <id>]
 
 # Grant a course role by Discord id (maps snowflake → internal user UUID).
 node apps/admin/dist/main.js course:set-role \
-  --slug ai-essentials --discord-id <id> --role <admin|privileged|standard> [--name "Display Name"]
+  --slug cs101 --discord-id <id> --role <admin|privileged|standard> [--name "Display Name"]
 
 # Ingest the course's Canvas materials into the retrievable store (needs a Canvas token).
-node apps/admin/dist/main.js course:ingest --slug ai-essentials
+node apps/admin/dist/main.js course:ingest --slug cs101
 
 # List all registered courses.
 node apps/admin/dist/main.js course:list
 ```
 
 > The bot replies to **every** non-bot message in a mapped channel (no @mention
-> needed), so use a dedicated Q&A channel (e.g. `#ai-ta`). Follow-up messages in
+> needed), so use a dedicated Q&A channel (e.g. `#ask-the-ta`). Follow-up messages in
 > the reply thread are answered too.
 
 ---
@@ -416,12 +416,12 @@ flowchart LR
     REPO["repo: main"]
     GA["Actions: build + push"]
   end
-  subgraph AZ["Azure · RG VirtualTeachingAssistant"]
-    ACR["Container Registry<br/>(vtaacr… · eastus2)"]
-    subgraph ENV["Container Apps Env (westus3)"]
-      APP["vta-discord-worker<br/>1 replica · no ingress<br/>secrets: DB / DeepSeek / OpenAI / Discord"]
+  subgraph AZ["Azure · one resource group"]
+    ACR["Container Registry"]
+    subgraph ENV["Container Apps Environment"]
+      APP["worker container app<br/>1 replica · no ingress<br/>secrets: DB / DeepSeek / OpenAI / Discord"]
     end
-    PG[("Postgres Flexible<br/>pg16 + pgvector · westus3")]
+    PG[("Postgres Flexible<br/>pg16 + pgvector")]
   end
   DISCORD["Discord gateway"]
 
@@ -431,20 +431,23 @@ flowchart LR
   APP <--> DISCORD
 ```
 
-| Resource | Name / SKU | Region | Purpose |
-| --- | --- | --- | --- |
-| Resource group | `VirtualTeachingAssistant` | (eastus2 metadata) | holds everything |
-| Postgres Flexible Server | `vta-pg-westus3-…` · B1ms · pg16 | westus3 | RAG store + audit log (pgvector + FTS) |
-| Container Registry | `vtaacri35td7bkyqi2a` · Basic | eastus2 | worker image |
-| Container Apps Env | `vta-env` | westus3 | runtime (co-located with Postgres) |
-| Container App | `vta-discord-worker` · 0.5 vCPU / 1 GiB · min=max=1 | westus3 | the always-on bot |
+| Resource | SKU | Purpose |
+| --- | --- | --- |
+| Resource group | — | holds everything |
+| Postgres Flexible Server | B1ms · pg16 | RAG store + audit log (pgvector + FTS) |
+| Container Registry | Basic | worker image |
+| Container Apps Environment | — | runtime (co-located with Postgres) |
+| Container App | 0.5 vCPU / 1 GiB · min=max=1 | the always-on bot |
+
+(Actual resource names/regions/ids are kept out of this repo; operators set them
+via environment variables / GitHub Actions variables — see `scripts/deploy.local.ps1.example`.)
 
 IaC for the data layer is in `infra/azure/*.bicep`. Two **subscription quirks**
 are baked in and worth knowing:
 
-- **Postgres Flexible is offer-restricted in `eastus`/`eastus2`** on this
-  subscription, so the server runs in **westus3** (the Bicep splits the RG region
-  from the DB region).
+- **Postgres Flexible can be offer-restricted in busy regions** on some
+  subscriptions, so the Bicep splits the resource-group region from the database
+  region (deploy the DB to a region where the offer is available).
 - **pgvector must be created before `db:push`** — Bicep allow-lists the extension
   (`azure.extensions=VECTOR`) but you still run `CREATE EXTENSION vector` (handled
   by `db:indexes`).
@@ -474,12 +477,11 @@ pwsh scripts/deploy.ps1            # roll the Container App to the latest image
 > **Why deploy isn't fully automatic (yet).** The JHU tenant blocks this account
 > from creating a service principal *and* from assigning roles (it is Contributor,
 > not Owner). So CI has no Azure identity allowed to update the Container App. The
-> OIDC plumbing is already in place (a federated user-assigned managed identity
-> `vta-github-deploy`, with the deploy job wired but gated behind the `AUTO_DEPLOY`
-> variable). **To enable zero-touch deploys**, a subscription **Owner** runs one
-> role assignment for that identity and flips one variable — see the header of
-> `scripts/deploy.ps1`. Until then: `git push` builds & pushes automatically; one
-> local command rolls it out.
+> OIDC plumbing is already in place (a federated user-assigned managed identity,
+> with the deploy job wired but gated behind the `AUTO_DEPLOY` variable). **To
+> enable zero-touch deploys**, a subscription **Owner** runs one role assignment
+> for that identity and flips one variable — see `scripts/deploy.local.ps1.example`.
+> Until then: `git push` builds & pushes automatically; one local command rolls it out.
 
 ---
 
@@ -499,7 +501,7 @@ by the provider (env var = the UPPER_SNAKE form, e.g. `deepseek.api-key` →
 | `LLM_PROFILE` | no | `dev` \| `prod` (same shape; both API-key based) |
 | `SECRETS_PROVIDER` | no | `env` (default) \| `keyvault` |
 | `LOG_LEVEL` | no | `info` default |
-| `CANVAS_TOKEN_<COURSE>` | per course | Canvas API token for ingestion, e.g. `CANVAS_TOKEN_AI_ESSENTIALS` |
+| `CANVAS_TOKEN_<COURSE>` | per course | Canvas API token for ingestion, e.g. `CANVAS_TOKEN_CS101` |
 
 Never commit real secrets — `.env` is git-ignored; cloud secrets live in Container
 App secrets / Key Vault.
@@ -509,7 +511,7 @@ App secrets / Key Vault.
 ## Status & roadmap
 
 **Live now**
-- ✅ Full stack deployed to Azure; Discord bot online and answering in `#ai-ta`.
+- ✅ Full stack deployed to Azure; Discord bot online and answering in its channel.
 - ✅ Governed pipeline end-to-end (ingress → agent → egress → audit), verified
   against the real database and live DeepSeek/OpenAI.
 - ✅ General-knowledge answers + OpenAI hosted **web search**.
@@ -517,7 +519,7 @@ App secrets / Key Vault.
 
 **In progress / next**
 - ⏳ **Canvas ingestion** for the pilot course (needs the course's Canvas token) —
-  until then answers are general, not grounded in AI Essentials materials.
+  until then answers are general, not grounded in the course's own materials.
 - ⏳ **Multi-turn memory** — each question is currently answered independently
   (thread history is not yet fed back to the agent).
 - ⏳ **Zero-touch deploy** — pending one Owner-level role grant (see [CI/CD](#cicd)).
