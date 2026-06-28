@@ -30,7 +30,7 @@
  * a thrown error can never deliver an ungoverned answer.
  */
 
-import type { InboundRequest, OutboundReply, Logger } from '@vta/shared';
+import type { ConversationTurn, InboundRequest, OutboundReply, Logger } from '@vta/shared';
 import { createLogger, toError } from '@vta/shared';
 import type { ResolvedCourseConfig } from '@vta/tenancy';
 import type { GovernanceContext, IngressGovernor, EgressGovernor } from '@vta/governance';
@@ -66,6 +66,11 @@ export interface TeachingServiceDeps {
  */
 const ERROR_REPLY_TEXT =
   'Sorry — something went wrong on my end and I couldn’t complete your request. Please try again in a moment.';
+
+/** Most recent conversation turns to replay as context (bounds the model context). */
+const MAX_HISTORY_TURNS = 12;
+/** Per-turn character cap when replaying history. */
+const MAX_HISTORY_TURN_CHARS = 2000;
 
 export class TeachingService {
   private readonly loadCourseConfig: ConfigLoader;
@@ -133,10 +138,14 @@ export class TeachingService {
       }
 
       // (3) AGENT — answer the redacted question within the governance context.
+      // Prior conversation turns (if any) are PII-redacted here before the model
+      // sees them, mirroring the ingress redaction applied to the live question.
+      const history = await this.redactHistory(request.history);
       const agentOutput: AgentOutput = await this.agent.answer({
         govContext,
         question: redactedText,
         ...(request.locale !== undefined ? { locale: request.locale } : {}),
+        ...(history.length > 0 ? { history } : {}),
       });
       collected.push(...agentOutput.governanceVerdicts);
 
@@ -179,6 +188,38 @@ export class TeachingService {
         ...(request.threadId !== undefined ? { threadId: request.threadId } : {}),
       };
     }
+  }
+
+  /**
+   * Bound and PII-redact prior conversation turns before they reach the model.
+   * Keeps only the most recent {@link MAX_HISTORY_TURNS}; caps each turn's
+   * length; re-redacts `user` turns through the ingress redactor (a redactor
+   * failure DROPS that turn rather than replaying raw PII); passes `assistant`
+   * turns through unchanged (they were egress-governed when first delivered).
+   */
+  private async redactHistory(
+    history: readonly ConversationTurn[] | undefined,
+  ): Promise<ConversationTurn[]> {
+    if (history === undefined || history.length === 0) return [];
+    const recent = history.slice(-MAX_HISTORY_TURNS);
+    const out: ConversationTurn[] = [];
+    for (const turn of recent) {
+      const content = turn.content.slice(0, MAX_HISTORY_TURN_CHARS);
+      if (content.trim() === '') continue;
+      if (turn.role === 'assistant') {
+        out.push({ role: 'assistant', content });
+        continue;
+      }
+      try {
+        out.push({ role: 'user', content: await this.ingress.redactText(content) });
+      } catch (err) {
+        this.log.warn(
+          { err: toError(err).message },
+          'dropping a history turn whose PII redaction failed',
+        );
+      }
+    }
+    return out;
   }
 
   /**

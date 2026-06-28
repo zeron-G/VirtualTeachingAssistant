@@ -73,8 +73,17 @@ export class PiAgent implements CourseAgent {
       role: input.govContext.role,
     };
 
+    // System prompt, then any prior conversation turns (already PII-redacted by
+    // the caller), then the current question. History gives follow-ups context;
+    // it never carries tool calls (plain user/assistant text only).
+    const history: LlmMessage[] = (input.history ?? []).map((turn) =>
+      turn.role === 'assistant'
+        ? { role: 'assistant', content: turn.content }
+        : { role: 'user', content: turn.content },
+    );
     const messages: LlmMessage[] = [
       { role: 'system', content: buildSystemPrompt(input) },
+      ...history,
       { role: 'user', content: input.question },
     ];
 

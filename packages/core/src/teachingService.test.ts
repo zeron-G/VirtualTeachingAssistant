@@ -27,8 +27,8 @@ import {
   DEFAULT_LOCALE_CONFIG,
 } from '@vta/tenancy';
 import type { ContentRules, ResolvedCourseConfig } from '@vta/tenancy';
-import type { InboundRequest, Citation } from '@vta/shared';
-import type { CourseAgent, AgentOutput } from '@vta/agent';
+import type { InboundRequest, Citation, ConversationTurn } from '@vta/shared';
+import type { CourseAgent, AgentOutput, AgentInput } from '@vta/agent';
 import type { AuditService, AuditEntry } from '@vta/audit';
 
 import { TeachingService } from './teachingService.js';
@@ -60,6 +60,8 @@ interface Harness {
   service: TeachingService;
   audited: AuditEntry[];
   agentCalls: { count: number };
+  /** The most recent AgentInput the service handed the agent. */
+  lastAgentInput: { value: AgentInput | undefined };
 }
 
 function makeService(opts: {
@@ -68,10 +70,12 @@ function makeService(opts: {
 }): Harness {
   const audited: AuditEntry[] = [];
   const agentCalls = { count: 0 };
+  const lastAgentInput: { value: AgentInput | undefined } = { value: undefined };
 
   const agent: CourseAgent = {
-    async answer(): Promise<AgentOutput> {
+    async answer(input: AgentInput): Promise<AgentOutput> {
       agentCalls.count += 1;
+      lastAgentInput.value = input;
       return opts.agentOutput;
     },
   };
@@ -93,7 +97,7 @@ function makeService(opts: {
     audit: auditSink,
   };
 
-  return { service: new TeachingService(deps), audited, agentCalls };
+  return { service: new TeachingService(deps), audited, agentCalls, lastAgentInput };
 }
 
 const groundedAnswer: AgentOutput = {
@@ -152,5 +156,39 @@ describe('TeachingService pipeline', () => {
     const stored = audited[0]?.question ?? '';
     expect(stored).not.toContain('foo@bar.edu');
     expect(stored).toContain('[REDACTED_EMAIL]');
+  });
+
+  it('passes prior conversation history to the agent, PII-redacting user turns', async () => {
+    const { service, lastAgentInput } = makeService({ agentOutput: groundedAnswer });
+
+    const history: ConversationTurn[] = [
+      { role: 'user', content: 'reach me at student@uni.edu about grading' },
+      { role: 'assistant', content: 'Sure — what would you like to know?' },
+    ];
+    await service.handle({ ...makeRequest('follow-up question?'), history });
+
+    const passed = lastAgentInput.value?.history ?? [];
+    expect(passed).toHaveLength(2);
+    // User turn re-redacted; assistant turn passed through verbatim.
+    expect(passed[0]?.role).toBe('user');
+    expect(passed[0]?.content).not.toContain('student@uni.edu');
+    expect(passed[0]?.content).toContain('[REDACTED_EMAIL]');
+    expect(passed[1]).toEqual({ role: 'assistant', content: 'Sure — what would you like to know?' });
+  });
+
+  it('bounds history to the most recent turns', async () => {
+    const { service, lastAgentInput } = makeService({ agentOutput: groundedAnswer });
+
+    // 20 prior user turns; only the most recent 12 should survive.
+    const history: ConversationTurn[] = Array.from({ length: 20 }, (_, i) => ({
+      role: 'user' as const,
+      content: `turn ${i}`,
+    }));
+    await service.handle({ ...makeRequest('latest?'), history });
+
+    const passed = lastAgentInput.value?.history ?? [];
+    expect(passed).toHaveLength(12);
+    expect(passed[0]?.content).toBe('turn 8'); // 20 - 12
+    expect(passed[11]?.content).toBe('turn 19');
   });
 });

@@ -17,13 +17,16 @@
 
 import type { Message, ThreadChannel } from 'discord.js';
 
-import type { InboundRequest } from '@vta/shared';
+import type { ConversationTurn, InboundRequest } from '@vta/shared';
 import { toError } from '@vta/shared';
 
 import type { WorkerServices } from './services.js';
 
 /** Discord hard-caps a single message at 2000 characters. */
 const DISCORD_MESSAGE_LIMIT = 2000;
+
+/** How many prior thread messages to pull as conversation history for follow-ups. */
+const HISTORY_FETCH_LIMIT = 12;
 
 /** Max length of the auto-generated thread title (Discord caps thread names at 100). */
 const THREAD_TITLE_MAX = 90;
@@ -91,6 +94,11 @@ export function makeMessageHandler(
       });
       if (tenant === null) return;
 
+      // Reconstruct recent conversation history for follow-ups inside a thread,
+      // so the agent has context. Core re-redacts + bounds it; a fetch failure
+      // is non-fatal (we just answer without history).
+      const history = inThread ? await fetchThreadHistory(message, log) : [];
+
       // (3) Build the channel-agnostic request. `threadId` is set only when the
       // message already lives in a thread; for a top-level message it is left
       // undefined (a fresh thread is created at post time).
@@ -104,6 +112,7 @@ export function makeMessageHandler(
         role: tenant.role,
         text,
         ...(inThread ? { threadId: message.channelId } : {}),
+        ...(history.length > 0 ? { history } : {}),
         receivedAt: new Date().toISOString(),
       };
 
@@ -123,6 +132,48 @@ export function makeMessageHandler(
       );
     }
   };
+}
+
+/**
+ * Reconstruct recent conversation turns from the messages already in this
+ * thread, oldest-first, EXCLUDING the current message. Our own bot's messages
+ * become `assistant` turns; human messages become `user` turns; other bots and
+ * empty/embeds-only messages are skipped. A fetch failure yields no history (the
+ * pipeline still answers, just without context). Core bounds + PII-redacts this.
+ */
+async function fetchThreadHistory(
+  message: Message,
+  log: MessageHandlerDeps['log'],
+): Promise<ConversationTurn[]> {
+  if (!message.channel.isThread()) return [];
+  const botId = message.client.user?.id;
+  try {
+    const fetched = await message.channel.messages.fetch({
+      limit: HISTORY_FETCH_LIMIT,
+      before: message.id,
+    });
+    // `fetch` returns newest-first; reverse to chronological order.
+    const turns: ConversationTurn[] = [];
+    for (const m of [...fetched.values()].reverse()) {
+      const content = m.content.trim();
+      if (content === '') continue;
+      if (m.author.bot) {
+        // Only OUR bot's posts are assistant turns; ignore any other bots.
+        if (botId !== undefined && m.author.id === botId) {
+          turns.push({ role: 'assistant', content });
+        }
+        continue;
+      }
+      turns.push({ role: 'user', content });
+    }
+    return turns;
+  } catch (err) {
+    log.warn(
+      { err: toError(err).message, channelId: message.channelId },
+      'could not fetch thread history; answering without it',
+    );
+    return [];
+  }
 }
 
 /**

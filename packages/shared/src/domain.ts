@@ -21,6 +21,17 @@ export interface Attachment {
   readonly name?: string;
 }
 
+/**
+ * One prior turn of a conversation, reconstructed by a channel adapter (e.g. the
+ * last few messages in a Discord thread). `assistant` turns were already
+ * egress-governed when the bot posted them; `user` turns are re-redacted for PII
+ * by the core before they reach the model.
+ */
+export interface ConversationTurn {
+  readonly role: 'user' | 'assistant';
+  readonly content: string;
+}
+
 /** A normalized inbound message, scoped to exactly one course. */
 export interface InboundRequest {
   readonly id: string;
@@ -31,6 +42,12 @@ export interface InboundRequest {
   readonly text: string;
   /** Conversation/thread key within the channel, if any. */
   readonly threadId?: string;
+  /**
+   * Prior turns of THIS conversation (oldest first), if the adapter could
+   * reconstruct them — e.g. earlier messages in the same thread. Excludes the
+   * current message (`text`). Used to give the agent follow-up context.
+   */
+  readonly history?: readonly ConversationTurn[];
   /** BCP-47 language hint; the assistant mirrors the student's language. */
   readonly locale?: string;
   readonly attachments?: readonly Attachment[];

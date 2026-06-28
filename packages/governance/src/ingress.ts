@@ -128,6 +128,18 @@ export class IngressGovernor {
   }
 
   /**
+   * Redact PII from already-trusted text — e.g. prior conversation turns that
+   * were governed when first handled and are now replayed to the model as
+   * context. Unlike {@link inspect} this runs ONLY the PII redactor, not
+   * injection detection (the turn is context, not a fresh untrusted request).
+   * Propagates a redactor error so the caller can fail safe (drop the turn).
+   */
+  async redactText(text: string): Promise<string> {
+    const { redacted } = await this.pii.redact(text);
+    return redacted;
+  }
+
+  /**
    * Redact a detector's reason string before it enters the audit log, capped to
    * a sane length. Best-effort: on any redactor error, fall back to a fixed,
    * PII-free label rather than risk logging raw text.

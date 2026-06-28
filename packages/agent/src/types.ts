@@ -11,7 +11,7 @@
  * grounding so the caller's egress grounding gate can inspect it.
  */
 
-import type { Citation } from '@vta/shared';
+import type { Citation, ConversationTurn } from '@vta/shared';
 import type { GovernanceContext } from '@vta/governance';
 import type { GovernanceVerdict } from '@vta/audit';
 
@@ -28,6 +28,12 @@ export interface AgentInput {
   readonly govContext: GovernanceContext;
   readonly question: string;
   readonly locale?: string;
+  /**
+   * Prior conversation turns (oldest first), already PII-redacted by the caller.
+   * Supplied for follow-up context; the loop prepends them before the current
+   * question. Tenant scope still comes ONLY from `govContext`, never from history.
+   */
+  readonly history?: readonly ConversationTurn[];
 }
 
 /**
