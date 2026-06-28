@@ -28,10 +28,16 @@ export type {
   PiiRedactor,
   RedactionResult,
   LlmJudge,
+  Moderator,
+  ModerationResult,
 } from './ports.js';
 
 // Working default implementations of the ports.
-export { HeuristicInjectionDetector, RegexPiiRedactor } from './defaults.js';
+export {
+  HeuristicInjectionDetector,
+  CompositeInjectionDetector,
+  RegexPiiRedactor,
+} from './defaults.js';
 
 // Per-request context.
 export type { GovernanceContext } from './context.js';
@@ -53,6 +59,7 @@ export {
   EgressGovernor,
   HOMEWORK_REFUSAL,
   UNGROUNDED_REFUSAL,
+  MODERATION_REFUSAL,
 } from './egress.js';
 export type {
   EgressGovernorDeps,

@@ -11,9 +11,9 @@ import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_CONTENT_RULES } from '@vta/tenancy';
 
-import { EgressGovernor, UNGROUNDED_REFUSAL } from './egress.js';
+import { EgressGovernor, UNGROUNDED_REFUSAL, MODERATION_REFUSAL } from './egress.js';
 import type { GovernanceContext } from './context.js';
-import type { LlmJudge, PiiRedactor } from './ports.js';
+import type { LlmJudge, Moderator, PiiRedactor } from './ports.js';
 
 /** A trivial redactor that never finds PII (so it never alters the answer). */
 const NOOP_PII: PiiRedactor = {
@@ -101,5 +101,40 @@ describe('EgressGovernor fail-safe', () => {
     expect(decision.text).toBe(answer);
     expect(decision.citations).toHaveLength(1);
     expect(decision.citations[0]?.sourceId).toBe('m1');
+  });
+
+  // --- Moderation backstop ---------------------------------------------------
+
+  const MOD_CLEAN: Moderator = { moderate: () => Promise.resolve({ flagged: false, categories: [] }) };
+  const MOD_FLAG: Moderator = {
+    moderate: () => Promise.resolve({ flagged: true, categories: ['harassment'] }),
+  };
+  const MOD_THROW: Moderator = { moderate: () => Promise.reject(new Error('moderation down')) };
+
+  it('refuses when the content-safety moderator flags the answer', async () => {
+    const gov = new EgressGovernor({ pii: NOOP_PII, judge: JUDGE_SAYS_NO, moderator: MOD_FLAG });
+    const decision = await gov.inspect('some answer', CTX, { citations: [] });
+
+    expect(decision.status).toBe('refused');
+    expect(decision.text).toBe(MODERATION_REFUSAL);
+    expect(
+      decision.verdicts.some((v) => v.check === 'moderation' && v.decision === 'block'),
+    ).toBe(true);
+  });
+
+  it('fails OPEN when the moderator errors (secondary net must not block answers)', async () => {
+    const gov = new EgressGovernor({ pii: NOOP_PII, judge: JUDGE_SAYS_NO, moderator: MOD_THROW });
+    const decision = await gov.inspect('a clean answer', CTX, { citations: [] });
+
+    expect(decision.status).toBe('answered');
+    expect(
+      decision.verdicts.some((v) => v.check === 'moderation' && v.decision === 'flag'),
+    ).toBe(true);
+  });
+
+  it('answers normally when the moderator passes', async () => {
+    const gov = new EgressGovernor({ pii: NOOP_PII, judge: JUDGE_SAYS_NO, moderator: MOD_CLEAN });
+    const decision = await gov.inspect('a clean answer', CTX, { citations: [] });
+    expect(decision.status).toBe('answered');
   });
 });

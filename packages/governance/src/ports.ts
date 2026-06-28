@@ -85,3 +85,29 @@ export interface PiiRedactor {
 export interface LlmJudge {
   judge(system: string, user: string): Promise<string>;
 }
+
+/** Outcome of a content-moderation pass over one text. */
+export interface ModerationResult {
+  /** `true` when the text trips a moderation category (hate, violence, sexual, self-harm, …). */
+  readonly flagged: boolean;
+  /** The categories that fired, for the audit log. MUST be free of raw user text. */
+  readonly categories?: readonly string[];
+}
+
+/**
+ * A content-safety moderation classifier, applied at egress as a backstop after
+ * the deterministic + judge content-boundary checks.
+ *
+ * Default: no moderator is wired (`undefined`); the moderation seam is a no-op.
+ * TODO(swap): OpenAI moderation endpoint (wired today via `@vta/core`), Llama
+ * Guard, or Azure AI Content Safety.
+ *
+ * FAIL-OPEN by design (an exception to the package's usual fail-safe stance):
+ * this is a SECONDARY net running after the primary content rails. A moderation
+ * SERVICE outage must not block every legitimate answer, so a thrown error is
+ * recorded as a `flag` and the answer proceeds. A definite `flagged: true`,
+ * however, blocks.
+ */
+export interface Moderator {
+  moderate(text: string): Promise<ModerationResult>;
+}

@@ -36,7 +36,7 @@ import type { Citation, ReplyStatus } from '@vta/shared';
 import { toError } from '@vta/shared';
 
 import type { GovernanceContext } from './context.js';
-import type { LlmJudge, PiiRedactor } from './ports.js';
+import type { LlmJudge, Moderator, PiiRedactor } from './ports.js';
 
 /** Refusal message for a request to produce a full homework solution. */
 export const HOMEWORK_REFUSAL =
@@ -46,11 +46,17 @@ export const HOMEWORK_REFUSAL =
 export const UNGROUNDED_REFUSAL =
   'I couldn’t find this in the course materials, so I can’t answer confidently. Please check the syllabus or ask your instructor.';
 
+/** Refusal used when the content-safety moderator flags the candidate answer. */
+export const MODERATION_REFUSAL =
+  'I can’t share that response. Let’s keep things on topic for the course — please rephrase your question.';
+
 /** Dependencies injected into {@link EgressGovernor}. */
 export interface EgressGovernorDeps {
   readonly pii: PiiRedactor;
   /** Optional LLM-as-judge for semantic content-boundary checks. */
   readonly judge?: LlmJudge;
+  /** Optional content-safety moderator applied as an egress backstop. */
+  readonly moderator?: Moderator;
 }
 
 /** The retrieval provenance accompanying an answer. */
@@ -123,10 +129,12 @@ function matchAny(patterns: readonly RegExp[], text: string): boolean {
 export class EgressGovernor {
   private readonly pii: PiiRedactor;
   private readonly judge: LlmJudge | undefined;
+  private readonly moderator: Moderator | undefined;
 
   constructor(deps: EgressGovernorDeps) {
     this.pii = deps.pii;
     this.judge = deps.judge;
+    this.moderator = deps.moderator;
   }
 
   /**
@@ -190,8 +198,11 @@ export class EgressGovernor {
         return { status: 'refused', text: UNGROUNDED_REFUSAL, citations: [], verdicts };
       }
 
-      // (4) MODERATION — seam only today.
-      verdicts.push(this.moderationSeam(outbound));
+      // (4) MODERATION — content-safety backstop after the primary rails.
+      const moderation = await this.runModeration(outbound, verdicts);
+      if (moderation.blocked) {
+        return { status: 'refused', text: MODERATION_REFUSAL, citations: [], verdicts };
+      }
 
       // Return a defensive copy of citations so callers cannot mutate our input.
       return { status: 'answered', text: outbound, citations: [...citations], verdicts };
@@ -336,14 +347,43 @@ export class EgressGovernor {
   }
 
   /**
-   * Moderation seam. No-op default that always allows but leaves a `flag`-able
-   * verdict point. Wire a real classifier here without touching the gate order.
-   *
-   * TODO(swap): Llama Guard or Azure AI Content Safety moderation; on a positive
-   * hit, return a `block` verdict and have {@link inspect} refuse.
+   * Content-safety moderation backstop. Runs the injected {@link Moderator} (if
+   * any) over the final outbound text. A definite `flagged` result BLOCKS; a
+   * thrown error is FAIL-OPEN (recorded as a `flag`, answer proceeds) because
+   * this is a secondary net after the primary content rails — a moderation
+   * service outage must not refuse every legitimate answer. When no moderator is
+   * wired, it is an audited no-op.
    */
-  private moderationSeam(_text: string): GovernanceVerdict {
-    return makeVerdict(STAGE, 'moderation', 'allow', 'no-op moderation seam (default)');
+  private async runModeration(
+    text: string,
+    verdicts: GovernanceVerdict[],
+  ): Promise<{ blocked: boolean }> {
+    if (this.moderator === undefined) {
+      verdicts.push(makeVerdict(STAGE, 'moderation', 'allow', 'no moderator wired (no-op)'));
+      return { blocked: false };
+    }
+    try {
+      const result = await this.moderator.moderate(text);
+      if (result.flagged) {
+        const cats = result.categories && result.categories.length > 0
+          ? `: ${result.categories.join(', ')}`
+          : '';
+        verdicts.push(makeVerdict(STAGE, 'moderation', 'block', `flagged by moderation${cats}`));
+        return { blocked: true };
+      }
+      verdicts.push(makeVerdict(STAGE, 'moderation', 'allow'));
+      return { blocked: false };
+    } catch (err) {
+      verdicts.push(
+        makeVerdict(
+          STAGE,
+          'moderation',
+          'flag',
+          `moderation error (allowed; secondary net): ${toError(err).message}`,
+        ),
+      );
+      return { blocked: false };
+    }
   }
 }
 

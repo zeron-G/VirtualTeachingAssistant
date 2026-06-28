@@ -27,17 +27,19 @@ import {
 import type { SecretsProvider, Logger } from '@vta/shared';
 import { createLogger } from '@vta/shared';
 import type { RoleMapping } from '@vta/llm';
-import { ModelRouter, OpenAiWebSearch } from '@vta/llm';
+import { ModelRouter, OpenAiWebSearch, OpenAiModerator } from '@vta/llm';
 import type { EmbeddingProvider } from '@vta/rag';
 import { RagRetriever } from '@vta/rag';
 import { createDefaultTools } from '@vta/tools';
 import {
   EgressGovernor,
   HeuristicInjectionDetector,
+  CompositeInjectionDetector,
   IngressGovernor,
   RegexPiiRedactor,
   ToolGate,
 } from '@vta/governance';
+import type { Moderator } from '@vta/governance';
 import { StaticFallbackAgent, FallbackAgent, PiAgent } from '@vta/agent';
 import type { CourseAgent } from '@vta/agent';
 import { AuditService } from '@vta/audit';
@@ -45,6 +47,7 @@ import { loadCourseConfig } from '@vta/tenancy';
 import type { ResolvedCourseConfig } from '@vta/tenancy';
 
 import { routerJudge } from './llmJudge.js';
+import { routerInjectionDetector } from './guardrails.js';
 import { TeachingService } from './teachingService.js';
 
 /**
@@ -125,17 +128,36 @@ export function createTeachingService(config: CoreConfig): TeachingService {
   const toolgate = new ToolGate();
 
   // --- Governance: ingress + egress, wired with the working default ports. ---
-  // Concrete-impl choices live HERE: heuristic injection detector + regex PII
-  // redactor today; swap for Prompt Guard 2 / Presidio by editing only this.
+  // Injection detection combines the fast heuristic with an LLM classifier
+  // (guard.judge): the model catches subtle attempts the regex misses, and a
+  // model outage degrades to the heuristic rather than blocking everything.
+  // (PII is regex today; swap for Presidio by editing only this.)
   const ingress = new IngressGovernor({
-    injection: new HeuristicInjectionDetector(),
+    injection: new CompositeInjectionDetector([
+      new HeuristicInjectionDetector(),
+      routerInjectionDetector(router),
+    ]),
     pii: new RegexPiiRedactor(),
   });
-  // The egress content-boundary judge runs on the configured `guard.judge`
-  // model via the router (see `routerJudge`). Output PII uses the regex redactor.
+
+  // Egress: the content-boundary judge runs on `guard.judge` via the router; a
+  // content-safety moderator (OpenAI's hosted classifier, reusing `openai.api-key`)
+  // is a fail-open backstop. The OpenAI client is built lazily on first use so
+  // construction stays I/O-free; output PII uses the regex redactor.
+  let moderatorImpl: OpenAiModerator | undefined;
+  const moderator: Moderator = {
+    moderate: async (text: string) => {
+      if (moderatorImpl === undefined) {
+        const apiKey = await config.secrets.require('openai.api-key');
+        moderatorImpl = new OpenAiModerator({ credential: { kind: 'apiKey', apiKey } });
+      }
+      return moderatorImpl.moderate(text);
+    },
+  };
   const egress = new EgressGovernor({
     pii: new RegexPiiRedactor(),
     judge: routerJudge(router),
+    moderator,
   });
 
   // --- Agent: Pi primary (tool-using, governed loop) with a degraded-but-safe

@@ -112,6 +112,45 @@ export class HeuristicInjectionDetector implements InjectionDetector {
   }
 }
 
+/**
+ * Combine several {@link InjectionDetector}s into one, OR-ing their verdicts:
+ * the first detector to flag an injection wins (e.g. the fast heuristic catches
+ * the obvious cases; a model-backed detector catches the subtle ones).
+ *
+ * Resilience: a single detector that THROWS is tolerated as long as at least one
+ * detector returns a verdict — so an ML/network detector outage degrades to the
+ * remaining (e.g. heuristic) detectors rather than blocking every request. Only
+ * if EVERY detector throws does this rethrow, so the ingress fail-safe
+ * (default-deny) still applies to a total outage.
+ */
+export class CompositeInjectionDetector implements InjectionDetector {
+  private readonly detectors: readonly InjectionDetector[];
+
+  constructor(detectors: readonly InjectionDetector[]) {
+    this.detectors = detectors;
+  }
+
+  async detect(text: string): Promise<InjectionResult> {
+    let maxScore = 0;
+    let anySucceeded = false;
+    let lastError: unknown;
+    for (const detector of this.detectors) {
+      try {
+        const result = await detector.detect(text);
+        anySucceeded = true;
+        if (result.injection) return result;
+        if (result.score !== undefined) maxScore = Math.max(maxScore, result.score);
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    if (!anySucceeded) {
+      throw lastError ?? new Error('all injection detectors failed');
+    }
+    return { injection: false, score: maxScore };
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* PII redaction                                                              */
 /* -------------------------------------------------------------------------- */
