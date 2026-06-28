@@ -15,10 +15,11 @@
   },
   "dependencies": {
     "@vta/core": "workspace:*",
-    "@vta/tenancy": "workspace:*",
     "@vta/data": "workspace:*",
-    "@vta/shared": "workspace:*",
     "@vta/llm": "workspace:*",
+    "@vta/shared": "workspace:*",
+    "@vta/tenancy": "workspace:*",
+    "applicationinsights": "3.15.1",
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.7"
   },

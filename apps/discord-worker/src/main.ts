@@ -14,7 +14,31 @@ import { toError } from '@vta/shared';
 import { buildServices } from './services.js';
 import { makeMessageHandler } from './discordAdapter.js';
 
+/**
+ * Opt-in Application Insights. A no-op unless APPLICATIONINSIGHTS_CONNECTION_STRING
+ * is set (so local/dev and unconfigured deploys pay nothing). The SDK is loaded
+ * with a dynamic import so it never enters the startup path when telemetry is off.
+ * Auto-collects console logs (our pino output), exceptions, and outbound HTTP.
+ */
+async function initTelemetry(): Promise<void> {
+  const connectionString = process.env.APPLICATIONINSIGHTS_CONNECTION_STRING;
+  if (connectionString === undefined || connectionString === '') return;
+  try {
+    const appInsights = (await import('applicationinsights')).default;
+    appInsights
+      .setup(connectionString)
+      .setAutoCollectConsole(true, true)
+      .setAutoCollectExceptions(true)
+      .setSendLiveMetrics(false)
+      .start();
+  } catch (err) {
+    // Telemetry must never block the bot from starting.
+    console.error('failed to initialize Application Insights (continuing without it):', toError(err).message);
+  }
+}
+
 async function main(): Promise<void> {
+  await initTelemetry();
   const { teaching, tenancy, log, discordToken } = await buildServices();
 
   // Intents declare which gateway events we receive.

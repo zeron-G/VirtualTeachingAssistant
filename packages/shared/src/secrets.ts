@@ -11,6 +11,9 @@
  */
 
 import { SecretMissingError } from './errors.js';
+// Type-only import: erased at compile time, so the Azure SDK is NOT loaded at
+// startup — KeyVaultSecretsProvider dynamic-imports it lazily on first use.
+import type { SecretClient } from '@azure/keyvault-secrets';
 
 export interface SecretsProvider {
   /** Resolve a secret by name, or `undefined` if absent. */
@@ -48,23 +51,59 @@ export class EnvSecretsProvider extends BaseSecretsProvider {
 }
 
 /**
- * Azure Key Vault provider — stubbed until Azure is provisioned.
+ * Azure Key Vault-backed provider for production.
  *
- * TODO(phase-0/azure): implement with `@azure/keyvault-secrets` +
- * `@azure/identity` (DefaultAzureCredential / Managed Identity). Kept as a
- * stub so the wiring exists and the swap is config-only.
+ * Resolves secrets from an Azure Key Vault using `DefaultAzureCredential` (a
+ * managed identity in Azure; az-CLI / env credentials locally). The Azure SDKs
+ * are loaded with DYNAMIC import on first use so they never enter the bundle's
+ * startup path when `SECRETS_PROVIDER=env` (the common case).
+ *
+ * Secret-name mapping: logical names like `discord.bot-token` are mangled to a
+ * Key Vault-legal name (`^[0-9A-Za-z-]+$`) by replacing every other character
+ * with `-`, e.g. `discord.bot-token` -> `discord-bot-token`,
+ * `canvas.token.ai-essentials` -> `canvas-token-ai-essentials`. A missing secret
+ * resolves to `undefined` (so `require` throws the uniform `SecretMissingError`);
+ * any other Key Vault error propagates.
  */
 export class KeyVaultSecretsProvider extends BaseSecretsProvider {
+  private clientPromise: Promise<SecretClient> | undefined;
+
   constructor(private readonly vaultUrl: string) {
     super();
   }
 
-  get(_name: string): Promise<string | undefined> {
-    throw new Error(
-      `KeyVaultSecretsProvider is not implemented yet (vault: ${this.vaultUrl}). ` +
-        'Use SECRETS_PROVIDER=env for local development.',
-    );
+  private getClient(): Promise<SecretClient> {
+    if (this.clientPromise === undefined) {
+      this.clientPromise = (async () => {
+        const { SecretClient } = await import('@azure/keyvault-secrets');
+        const { DefaultAzureCredential } = await import('@azure/identity');
+        return new SecretClient(this.vaultUrl, new DefaultAzureCredential());
+      })();
+    }
+    return this.clientPromise;
   }
+
+  async get(name: string): Promise<string | undefined> {
+    const client = await this.getClient();
+    try {
+      const secret = await client.getSecret(toKeyVaultName(name));
+      return secret.value;
+    } catch (err) {
+      if (isSecretNotFound(err)) return undefined;
+      throw err;
+    }
+  }
+}
+
+/** Mangle a logical secret name into a Key Vault-legal name (`^[0-9A-Za-z-]+$`). */
+function toKeyVaultName(name: string): string {
+  return name.replace(/[^0-9A-Za-z-]/g, '-');
+}
+
+/** True when a Key Vault error means "no such secret" (404 / SecretNotFound). */
+function isSecretNotFound(err: unknown): boolean {
+  const e = err as { statusCode?: number; code?: string } | null;
+  return e?.statusCode === 404 || e?.code === 'SecretNotFound';
 }
 
 export interface SecretsProviderOptions {
