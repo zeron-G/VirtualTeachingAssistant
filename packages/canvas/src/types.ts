@@ -91,6 +91,10 @@ export interface CanvasDiscussionTopic {
   readonly message?: string | null;
   /** ISO-8601 publish/post time, if reported. */
   readonly posted_at?: string | null;
+  /** ISO-8601 scheduled post time; when in the future the announcement is not yet released. */
+  readonly delayed_post_at?: string | null;
+  /** Canvas workflow state, e.g. 'active' | 'post_delayed' | 'unpublished' | 'deleted'. */
+  readonly workflow_state?: string;
   readonly html_url?: string;
   /** True when this topic is an announcement rather than a forum thread. */
   readonly is_announcement?: boolean;

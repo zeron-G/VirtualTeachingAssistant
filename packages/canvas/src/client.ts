@@ -46,7 +46,11 @@ export interface CanvasClientOptions {
   readonly logger?: Logger;
   /** Max retry attempts for 429/5xx before giving up. Default 4. */
   readonly maxRetries?: number;
-  /** Safety cap on pagination to avoid unbounded loops. Default 100 pages. */
+  /**
+   * Safety cap on pagination to avoid unbounded loops. Default 1000 pages.
+   * Hitting it THROWS (never silently truncates) so a partial list is never
+   * mistaken for a complete sync.
+   */
   readonly maxPages?: number;
 }
 
@@ -78,7 +82,7 @@ export class CanvasClient {
     this.fetchImpl = options.fetchImpl ?? ((...args) => fetch(...args));
     this.log = options.logger ?? createLogger({ name: 'canvas-client' });
     this.maxRetries = options.maxRetries ?? 4;
-    this.maxPages = options.maxPages ?? 100;
+    this.maxPages = options.maxPages ?? 1000;
   }
 
   // ---------------------------------------------------------------------------
@@ -276,11 +280,15 @@ export class CanvasClient {
 
     while (nextUrl !== undefined) {
       if (pages >= this.maxPages) {
-        this.log.warn(
-          { path, maxPages: this.maxPages },
-          'canvas pagination cap reached; truncating results',
+        // FAIL LOUD rather than silently truncating: a partial list must never
+        // be mistaken for a complete one, or the ingestion delete-reconcile
+        // would delete every still-valid material beyond the cap. The default
+        // cap is high enough that real courses never hit it; if one does, raise
+        // maxPages rather than ship a truncated sync.
+        throw new CanvasApiError(
+          `Canvas pagination cap (${this.maxPages} pages) reached for ${path}; results would be truncated`,
+          { method, url: nextUrl },
         );
-        break;
       }
       const { body, linkNext } = await this.requestAbsolute(method, nextUrl);
       const parsed = JSON.parse(body) as unknown;

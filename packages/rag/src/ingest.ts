@@ -228,9 +228,20 @@ export class RagIngestor {
       out.push(toNormalizedAssignment(a));
     }
 
-    // --- Announcements (discussion topics — no separate publish state). -------
+    // --- Announcements: skip ones not yet released (scheduled/delayed or
+    //     unpublished), so a future-dated announcement is never retrievable
+    //     before its post time. -------------------------------------------------
     const announcements = await this.canvas.listAnnouncements(canvasId);
-    for (const ann of announcements) out.push(toNormalizedAnnouncement(ann));
+    for (const ann of announcements) {
+      const state = ann.workflow_state;
+      if (state === 'post_delayed' || state === 'unpublished' || state === 'deleted') continue;
+      const delayed = ann.delayed_post_at;
+      if (typeof delayed === 'string') {
+        const at = Date.parse(delayed);
+        if (Number.isFinite(at) && at > Date.now()) continue;
+      }
+      out.push(toNormalizedAnnouncement(ann));
+    }
 
     // --- Modules (items inlined). ---------------------------------------------
     const modules = await this.canvas.listModules(canvasId);

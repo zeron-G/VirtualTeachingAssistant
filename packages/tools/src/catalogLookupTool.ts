@@ -18,6 +18,7 @@
 import { and, eq, ilike } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { z } from 'zod';
+import type { Citation } from '@vta/shared';
 import type { Db, MaterialRow } from '@vta/data';
 import { materials } from '@vta/data';
 
@@ -79,6 +80,7 @@ export function createCatalogLookupTool(db: Db): VtaTool<CatalogArgs> {
 
       const rows = await db
         .select({
+          id: materials.id,
           title: materials.title,
           kind: materials.kind,
           uri: materials.uri,
@@ -88,9 +90,17 @@ export function createCatalogLookupTool(db: Db): VtaTool<CatalogArgs> {
         .orderBy(materials.kind, materials.title)
         .limit(MAX_ROWS);
 
+      // Emit citations too, so an answer grounded in "what materials exist" is
+      // properly attributable (and not refused when a course requires citations).
+      const citations: Citation[] = rows.map((r) => ({
+        sourceId: r.id,
+        title: r.title,
+        ...(r.uri !== null && r.uri !== undefined ? { locator: r.uri } : {}),
+      }));
+
       return {
         content: formatCatalog(rows),
-        data: rows,
+        data: { materials: rows, citations },
       };
     },
   };

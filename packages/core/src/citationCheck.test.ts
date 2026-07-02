@@ -49,4 +49,52 @@ describe('verifyCitations', () => {
     expect(r.text).toContain('https://ok.example/a');
     expect(r.text).not.toContain('bad.example');
   });
+
+  // --- Regressions from the adversarial review ---
+
+  it('KEEPS a real URL containing parentheses (Wikipedia disambiguation)', () => {
+    const url = 'https://en.wikipedia.org/wiki/Python_(programming_language)';
+    const r = verifyCitations(`See ${url} for details.`, [web(url)]);
+    expect(r.fabricatedCount).toBe(0);
+    expect(r.text).toContain(url); // not truncated at '('
+  });
+
+  it('unwraps a FABRICATED markdown link to plain label + marker (no dangling markdown)', () => {
+    const r = verifyCitations(
+      'Check the [official syllabus](https://fabricated.edu/course).',
+      [web('https://ok.example/a')],
+    );
+    expect(r.fabricatedCount).toBe(1);
+    expect(r.text).not.toContain('fabricated.edu');
+    expect(r.text).not.toContain('](' ); // no malformed markdown link remains
+    expect(r.text).toContain('official syllabus');
+  });
+
+  it('keeps a REAL markdown link intact', () => {
+    const r = verifyCitations(
+      'See [the docs](https://ok.example/a/).',
+      [web('https://ok.example/a')],
+    );
+    expect(r.fabricatedCount).toBe(0);
+    expect(r.text).toContain('[the docs](https://ok.example/a/)');
+  });
+
+  it('treats a case-variant path as a DIFFERENT resource (strips it)', () => {
+    // path case is significant; a variant of a real URL is not the real source.
+    const r = verifyCitations('See https://host.edu/docs/secret here.', [
+      web('https://host.edu/Docs/Secret'),
+    ]);
+    expect(r.fabricatedCount).toBe(1);
+    // but scheme+host case is NOT significant:
+    const r2 = verifyCitations('See https://HOST.edu/Docs/Secret here.', [
+      web('https://host.edu/Docs/Secret'),
+    ]);
+    expect(r2.fabricatedCount).toBe(0);
+  });
+
+  it('matches URLs with query strings and fragments', () => {
+    const url = 'https://x.example/a?b=1&c=2#frag';
+    const r = verifyCitations(`Ref: ${url}`, [web(url)]);
+    expect(r.fabricatedCount).toBe(0);
+  });
 });
