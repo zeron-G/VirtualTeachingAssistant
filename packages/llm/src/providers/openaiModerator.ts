@@ -13,6 +13,7 @@
 
 import OpenAI from 'openai';
 import { LlmUnavailableError, toError } from '@vta/shared';
+import { DEFAULT_MAX_RETRIES, DEFAULT_REQUEST_TIMEOUT_MS } from '../transport.js';
 import type { PiCredential } from './piProvider.js';
 
 /** Result of a moderation pass (matches the governance `ModerationResult` shape). */
@@ -39,6 +40,8 @@ export class OpenAiModerator {
   constructor(options: OpenAiModeratorOptions) {
     this.client = new OpenAI({
       apiKey: options.credential.apiKey,
+      timeout: DEFAULT_REQUEST_TIMEOUT_MS,
+      maxRetries: DEFAULT_MAX_RETRIES,
       ...(options.endpoint !== undefined ? { baseURL: options.endpoint } : {}),
     });
     this.model = options.model ?? DEFAULT_MODEL;

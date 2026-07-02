@@ -22,6 +22,7 @@ import type {
 } from 'openai/resources/chat/completions';
 import { LlmUnavailableError, toError } from '@vta/shared';
 import type { LlmProvider } from '../provider.js';
+import { DEFAULT_MAX_RETRIES, DEFAULT_REQUEST_TIMEOUT_MS } from '../transport.js';
 import type {
   LlmMessage,
   LlmRequest,
@@ -142,8 +143,12 @@ export class PiProvider implements LlmProvider {
     const { model, providerLabel, endpoint, credential } = this.options;
 
     // Build the client per call (cheap) so a refreshed credential is always used.
+    // timeout + maxRetries are resilience guards: a hung upstream is aborted
+    // rather than wedging the (single) worker replica indefinitely.
     const client = new OpenAI({
       apiKey: credential.apiKey,
+      timeout: DEFAULT_REQUEST_TIMEOUT_MS,
+      maxRetries: DEFAULT_MAX_RETRIES,
       ...(endpoint !== undefined ? { baseURL: endpoint } : {}),
     });
 
@@ -152,6 +157,8 @@ export class PiProvider implements LlmProvider {
         model,
         messages: toOpenAiMessages(req.messages),
         ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+        // Only bound the output when the caller explicitly asks; no default cap
+        // (the request timeout guards runaway generation without truncating).
         ...(req.maxTokens !== undefined ? { max_tokens: req.maxTokens } : {}),
         ...(req.tools !== undefined ? { tools: toOpenAiTools(req.tools) } : {}),
         ...(req.toolChoice !== undefined

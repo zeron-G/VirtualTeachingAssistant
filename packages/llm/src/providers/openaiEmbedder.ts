@@ -11,6 +11,7 @@
 import OpenAI from 'openai';
 import { LlmUnavailableError, toError } from '@vta/shared';
 import type { Embedder } from '../provider.js';
+import { DEFAULT_MAX_RETRIES, DEFAULT_REQUEST_TIMEOUT_MS } from '../transport.js';
 import type { PiCredential } from './piProvider.js';
 
 export interface OpenAiEmbedderOptions {
@@ -32,6 +33,8 @@ export class OpenAiEmbedder implements Embedder {
 
     return new OpenAI({
       apiKey,
+      timeout: DEFAULT_REQUEST_TIMEOUT_MS,
+      maxRetries: DEFAULT_MAX_RETRIES,
       ...(endpoint !== undefined ? { baseURL: endpoint } : {}),
     });
   }

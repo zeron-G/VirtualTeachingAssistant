@@ -17,6 +17,14 @@ import { guardCourse } from "./guard.js";
 export type ChunkInput = Omit<NewChunkRow, "courseId" | "materialId">;
 
 /**
+ * Rows per INSERT statement when writing chunks. Each row binds ~6 parameters
+ * and Postgres caps a statement at 65535 bound parameters (~10.9k rows), so a
+ * large material must be split across statements. 500 keeps each statement small
+ * and fast while still being one round-trip per batch.
+ */
+const CHUNK_INSERT_BATCH_SIZE = 500;
+
+/**
  * Course-scoped access to materials and their chunks. Every method takes an
  * explicit `courseId` and refuses to touch rows belonging to another course.
  */
@@ -145,7 +153,15 @@ export class MaterialRepository {
           courseId,
           materialId,
         }));
-        await tx.insert(chunks).values(rows);
+        // Insert in batches: a single multi-row INSERT binds ~6 params/row, and
+        // Postgres' wire protocol caps a statement at 65535 bound parameters, so
+        // one statement for a large material (thousands of chunks) would fail.
+        // Batching also keeps each statement short enough to stay well under any
+        // per-statement timeout. All batches run in this one transaction, so the
+        // replace stays atomic.
+        for (let i = 0; i < rows.length; i += CHUNK_INSERT_BATCH_SIZE) {
+          await tx.insert(chunks).values(rows.slice(i, i + CHUNK_INSERT_BATCH_SIZE));
+        }
       }
 
       // Stamp the hash LAST, inside the same tx, so it is atomic with the chunk

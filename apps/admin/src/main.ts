@@ -343,7 +343,11 @@ async function main(): Promise<void> {
 
   // Build shared infrastructure ONCE. `loadConfig` fails fast on a bad env.
   const appConfig = loadConfig();
-  const db = createDb(appConfig.DATABASE_URL);
+  // Ingestion is a trusted, unattended batch job: its bulk vector inserts on a
+  // small DB instance can legitimately run longer than the interactive answer
+  // path's 30s guard, so disable the statement/query timeouts here (completeness
+  // over bounding a single statement). The answer path keeps the defaults.
+  const db = createDb(appConfig.DATABASE_URL, { statementTimeoutMs: 0, queryTimeoutMs: 0 });
   const secrets = createSecretsProvider({
     provider: appConfig.SECRETS_PROVIDER,
     ...(appConfig.AZURE_KEY_VAULT_URL !== undefined

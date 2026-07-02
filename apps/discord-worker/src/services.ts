@@ -40,6 +40,11 @@ export interface WorkerServices {
   readonly log: Logger;
   /** The resolved Discord bot token, fetched from the secrets provider. */
   readonly discordToken: string;
+  /**
+   * The shared connection pool handle. Exposed ONLY so the entrypoint can drain
+   * it (`closeDb`) during graceful shutdown; the message path never touches it.
+   */
+  readonly db: Db;
 }
 
 /**
@@ -70,8 +75,12 @@ export async function buildServices(): Promise<WorkerServices> {
   });
 
   // One shared connection pool. Tenancy reads course/role/config from it; core
-  // reads retrieval chunks and writes the audit log through it.
-  const db: Db = createDb(config.DATABASE_URL);
+  // reads retrieval chunks and writes the audit log through it. The pool-error
+  // handler keeps a dropped backend connection from crashing the worker.
+  const db: Db = createDb(config.DATABASE_URL, {
+    onPoolError: (err) =>
+      log.error({ err: err.message }, "postgres pool error (connection dropped; pool will recover)"),
+  });
 
   // The active logical-role → concrete-model mapping for this deployment.
   const mapping = loadProfile(config.LLM_PROFILE);
@@ -94,5 +103,5 @@ export async function buildServices(): Promise<WorkerServices> {
   // variable (UPPER_SNAKE, dots/dashes → underscores).
   const discordToken = await secrets.require('discord.bot-token');
 
-  return { teaching, tenancy, log, discordToken };
+  return { teaching, tenancy, log, discordToken, db };
 }

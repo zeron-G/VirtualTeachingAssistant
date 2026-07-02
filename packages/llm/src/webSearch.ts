@@ -16,6 +16,8 @@ import OpenAI from 'openai';
 import { LlmUnavailableError, toError } from '@vta/shared';
 import type { Citation } from '@vta/shared';
 
+import { DEFAULT_MAX_RETRIES, DEFAULT_REQUEST_TIMEOUT_MS } from './transport.js';
+
 export interface OpenAiWebSearchOptions {
   /** OpenAI API key (the same `openai.api-key` used elsewhere). */
   readonly apiKey: string;
@@ -74,6 +76,8 @@ export class OpenAiWebSearch {
   constructor(options: OpenAiWebSearchOptions) {
     this.client = new OpenAI({
       apiKey: options.apiKey,
+      timeout: DEFAULT_REQUEST_TIMEOUT_MS,
+      maxRetries: DEFAULT_MAX_RETRIES,
       ...(options.endpoint !== undefined ? { baseURL: options.endpoint } : {}),
     });
     this.model = options.model ?? DEFAULT_MODEL;
@@ -141,6 +145,8 @@ export class OpenRouterWebSearch {
     this.client = new OpenAI({
       apiKey: options.apiKey,
       baseURL: options.endpoint ?? OPENROUTER_DEFAULT_ENDPOINT,
+      timeout: DEFAULT_REQUEST_TIMEOUT_MS,
+      maxRetries: DEFAULT_MAX_RETRIES,
     });
     this.model = `${options.model ?? OPENROUTER_DEFAULT_MODEL}:online`;
   }

@@ -5,14 +5,14 @@
  * cross courses throw `TenantMismatchError` from `@vta/shared`.
  *
  * Public surface:
- *   - client:       `createDb`, `getDefaultDb`, `db`, and the `Db` type.
+ *   - client:       `createDb`, `closeDb`, `getDefaultDb`, `db`, and the `Db` type.
  *   - schema:       all table definitions + their inferred row types.
  *   - repositories: course-scoped repositories + the `guardCourse` helper.
  */
 
 // Client / connection.
-export { createDb, getDefaultDb, db } from "./client.js";
-export type { Db } from "./client.js";
+export { createDb, closeDb, getDefaultDb, db } from "./client.js";
+export type { Db, CreateDbOptions } from "./client.js";
 
 // Schema (tables + row types).
 export * from "./schema/index.js";
