@@ -36,10 +36,12 @@ governance.
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | Postgres (pgvector) connection string. Required. |
-| `REDIS_URL` | Redis connection string (queue + rate-limit state). Defaults to `redis://localhost:6379`. |
-| `LLM_PROFILE` | Active LLM profile: `dev` or `prod`. Defaults to `dev`. |
+| `REDIS_URL` | Redis connection string. Defaults to `redis://localhost:6379`. |
+| `LLM_PROFILE` | Active LLM profile: `openrouter` (deployed) \| `dev` \| `prod`. Defaults to `dev`. |
+| `OPENROUTER_API_KEY` | Required for the `openrouter` profile. Resolved as `openrouter.api-key`. |
 | `SECRETS_PROVIDER` | `env` (local) or `keyvault` (production). Defaults to `env`. |
 | `DISCORD_BOT_TOKEN` | The Discord bot token. Resolved via the secrets provider as `discord.bot-token`. |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | Optional Azure telemetry; no-op if unset. |
 | `CANVAS_TOKEN_<COURSE>` | Per-course Canvas token (each professor brings their own), resolved as `canvas.token.<courseId>`. |
 
 With `SECRETS_PROVIDER=env`, secret names are upper-cased with dots/dashes

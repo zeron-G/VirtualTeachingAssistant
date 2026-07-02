@@ -7,10 +7,11 @@
  *
  * `routerInjectionDetector` backs the `InjectionDetector` port with the
  * `guard.judge` model: it asks the model a single yes/no "is this a
- * prompt-injection / jailbreak attempt?" question. It is composed WITH the fast
- * heuristic detector (see `CompositeInjectionDetector`) so the model catches the
- * subtle attempts the regex signatures miss, while a model/network outage
- * degrades to the heuristic rather than blocking every request.
+ * prompt-injection / jailbreak attempt?" question. The ingress governor runs the
+ * fast heuristic detector on the RAW text and this model detector on the
+ * REDACTED text (two seams), so the model catches the subtle attempts the regex
+ * signatures miss, while a model/network outage degrades to the heuristic rather
+ * than blocking every request.
  */
 
 import type { InjectionDetector, InjectionResult, Moderator, ModerationResult } from '@vta/governance';

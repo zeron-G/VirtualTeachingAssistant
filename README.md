@@ -233,20 +233,28 @@ wiring change, not a rewrite.
 `@vta/llm` is the **only** package that names concrete models. Callers ask for a
 logical **role**; the router resolves it, authenticates with an API key, fails
 over primary → fallback, and records token usage. The chat transport is the
-**OpenAI-compatible Chat Completions API**, which serves *both* providers:
-OpenAI natively and **DeepSeek** via its OpenAI-compatible endpoint.
+**OpenAI-compatible Chat Completions API**, which serves every provider used
+here (OpenAI, DeepSeek, and the OpenRouter gateway) through one code path.
 
-| Role | Purpose | Model (current) | Provider |
-| --- | --- | --- | --- |
-| `agent.primary` | main reasoning / answers | `deepseek-v4-flash` | DeepSeek |
-| `agent.fallback` | failover when primary errors | `gpt-5.4-mini` | OpenAI |
-| `embed` | retrieval embeddings (1536-dim) | `text-embedding-3-small` | OpenAI |
-| `rerank` | listwise rerank (prompt-based stand-in) | `gpt-5.4-mini` | OpenAI |
-| `guard.judge` | LLM-as-judge for egress content rails | `gpt-5.4-mini` | OpenAI |
+The active `LLM_PROFILE` selects the routing. The **deployed** profile is
+`openrouter`, which sends *every* role through the [OpenRouter](https://openrouter.ai)
+gateway with a single key (no direct OpenAI/DeepSeek credentials):
 
-**Web search** reuses the same OpenAI key via OpenAI's **hosted** web search
-(Responses API `web_search` tool) — the same provider-hosted approach Claude Code
-and Codex use — so no third-party search API or extra credential is needed.
+| Role | Purpose | Model (openrouter profile) |
+| --- | --- | --- |
+| `agent.primary` | main reasoning / answers | `deepseek/deepseek-v4-flash` |
+| `agent.fallback` | failover when primary errors | `openai/gpt-5.4-mini` |
+| `embed` | retrieval embeddings (1536-dim) | `openai/text-embedding-3-small` |
+| `rerank` | listwise rerank (prompt-based stand-in) | `openai/gpt-5.4-mini` |
+| `guard.judge` | LLM-as-judge for egress content rails | `openai/gpt-5.4-mini` |
+
+The `dev` and `prod` profiles are alternatives that authenticate each provider
+directly — DeepSeek for primary chat, OpenAI for fallback + embeddings — and are
+selected by setting `LLM_PROFILE=dev` (or `prod`) with the corresponding keys.
+
+**Web search** reuses the same OpenRouter key via OpenRouter's `:online`
+mechanism (append `:online` to a chat model id) — no third-party search API or
+extra credential is needed.
 
 Authentication is **API-key only** (an earlier OAuth/Codex-CLI path was removed).
 Keys come from a `SecretsProvider`: environment variables in dev, and Azure
@@ -352,7 +360,7 @@ Docker (for local Postgres).
 ```bash
 corepack enable                 # use the pinned pnpm version
 pnpm install                    # install the workspace
-cp .env.example .env            # fill in DEEPSEEK_API_KEY / OPENAI_API_KEY / DISCORD_BOT_TOKEN
+cp .env.example .env            # fill in OPENROUTER_API_KEY + DISCORD_BOT_TOKEN (openrouter profile)
 
 pnpm infra:up                   # local Postgres (pgvector) via Docker Compose
 pnpm db:push                    # apply the Drizzle schema
@@ -519,19 +527,22 @@ pwsh scripts/deploy.ps1            # roll the Container App to the latest image
 ## Configuration & secrets
 
 Config is validated at startup (`@vta/shared`, Zod). Secret **names** are resolved
-by the provider (env var = the UPPER_SNAKE form, e.g. `deepseek.api-key` →
-`DEEPSEEK_API_KEY`).
+by the provider (env var = the UPPER_SNAKE form, e.g. `openrouter.api-key` →
+`OPENROUTER_API_KEY`).
 
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `DATABASE_URL` | yes | Postgres connection string (`…?sslmode=require` in cloud) |
-| `DEEPSEEK_API_KEY` | yes | primary chat model |
-| `OPENAI_API_KEY` | yes | fallback chat + embeddings + guard judge + web search |
+| `OPENROUTER_API_KEY` | yes (openrouter profile) | single key for all model traffic + `:online` web search |
 | `DISCORD_BOT_TOKEN` | yes | the bot needs the **Message Content** privileged intent enabled |
-| `DEEPSEEK_BASE_URL` | no | defaults to `https://api.deepseek.com` |
-| `LLM_PROFILE` | no | `dev` \| `prod` (same shape; both API-key based) |
+| `OPENROUTER_BASE_URL` | no | defaults to `https://openrouter.ai/api/v1` |
+| `DEEPSEEK_API_KEY` | dev/prod only | primary chat model when `LLM_PROFILE=dev\|prod` |
+| `OPENAI_API_KEY` | dev/prod only | fallback chat + embeddings when `LLM_PROFILE=dev\|prod` |
+| `DEEPSEEK_BASE_URL` | no | dev/prod only; defaults to `https://api.deepseek.com` |
+| `LLM_PROFILE` | no | `openrouter` (deployed) \| `dev` \| `prod` |
 | `SECRETS_PROVIDER` | no | `env` (default) \| `keyvault` |
 | `LOG_LEVEL` | no | `info` default |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | no | opt-in Azure telemetry; no-op if unset |
 | `CANVAS_TOKEN_<COURSE>` | per course | Canvas API token for ingestion, e.g. `CANVAS_TOKEN_CS101` |
 
 Never commit real secrets — `.env` is git-ignored; cloud secrets live in Container

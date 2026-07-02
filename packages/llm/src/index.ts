@@ -6,8 +6,9 @@
  * layer resolves it to a concrete provider + model, authenticates with API keys,
  * fails over primary→fallback, and records usage.
  *
- * All external-SDK uncertainty is isolated in `providers/piProvider.ts`
- * (pi-ai) and `providers/openaiEmbedder.ts` (openai). See their TODOs.
+ * All external-SDK usage is isolated in `providers/piProvider.ts` (chat, via the
+ * OpenAI SDK — also serves OpenAI-compatible gateways like OpenRouter/DeepSeek)
+ * and `providers/openaiEmbedder.ts` (embeddings).
  */
 
 // Core wire types
@@ -47,14 +48,6 @@ export type { OpenAiEmbedderOptions } from './providers/openaiEmbedder.js';
 export { ModelRouter } from './router.js';
 export type { ModelRouterOptions } from './router.js';
 
-// Web search (a tool capability, not a chat role): OpenAI-hosted or OpenRouter.
-export { OpenAiWebSearch, OpenRouterWebSearch } from './webSearch.js';
-export type {
-  OpenAiWebSearchOptions,
-  OpenRouterWebSearchOptions,
-  WebSearchResult,
-} from './webSearch.js';
-
-// OpenAI-hosted content moderation (an egress backstop, not a chat role).
-export { OpenAiModerator } from './providers/openaiModerator.js';
-export type { OpenAiModeratorOptions, ModerationOutcome } from './providers/openaiModerator.js';
+// Web search (a tool capability, not a chat role) via OpenRouter's `:online`.
+export { OpenRouterWebSearch } from './webSearch.js';
+export type { OpenRouterWebSearchOptions, WebSearchResult } from './webSearch.js';

@@ -33,11 +33,7 @@ export type {
 } from './ports.js';
 
 // Working default implementations of the ports.
-export {
-  HeuristicInjectionDetector,
-  CompositeInjectionDetector,
-  RegexPiiRedactor,
-} from './defaults.js';
+export { HeuristicInjectionDetector, RegexPiiRedactor } from './defaults.js';
 
 // Per-request context.
 export type { GovernanceContext } from './context.js';

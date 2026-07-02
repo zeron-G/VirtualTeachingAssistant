@@ -43,12 +43,13 @@ process environment is already populated.
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `DATABASE_URL` | yes | Postgres (pgvector) connection string. |
-| `LLM_PROFILE` | no (default `dev`) | `dev` \| `prod`. Selects the embedding model used during ingest. |
+| `LLM_PROFILE` | no (default `dev`) | `openrouter` (deployed) \| `dev` \| `prod`. Selects the embedding model used during ingest. |
 | `SECRETS_PROVIDER` | no (default `env`) | `env` \| `keyvault`. |
 | `AZURE_KEY_VAULT_URL` | only if `keyvault` | Vault URL when `SECRETS_PROVIDER=keyvault`. |
 | `CANVAS_TOKEN_<SLUG>` | for `course:ingest` | Per-course Canvas API token. Slug is upper-cased with `-`/`.` → `_`. |
 | `CANVAS_BASEURL_<SLUG>` | no | Optional per-course Canvas base URL override. |
-| `OPENAI_API_KEY` | for `course:ingest` | Resolved as `openai.api-key` for embeddings. |
+| `OPENROUTER_API_KEY` | for `course:ingest` (openrouter profile) | Resolved as `openrouter.api-key`; provides embeddings. |
+| `OPENAI_API_KEY` | for `course:ingest` (dev/prod profile) | Resolved as `openai.api-key` for embeddings. |
 
 Secret-name mangling follows the `@vta/shared` env provider convention:
 `canvas.token.cs101` reads `CANVAS_TOKEN_CS101`.
