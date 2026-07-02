@@ -34,7 +34,6 @@ import { createDefaultTools } from '@vta/tools';
 import {
   EgressGovernor,
   HeuristicInjectionDetector,
-  CompositeInjectionDetector,
   IngressGovernor,
   RegexPiiRedactor,
   ToolGate,
@@ -134,10 +133,10 @@ export function createTeachingService(config: CoreConfig): TeachingService {
   // model outage degrades to the heuristic rather than blocking everything.
   // (PII is regex today; swap for Presidio by editing only this.)
   const ingress = new IngressGovernor({
-    injection: new CompositeInjectionDetector([
-      new HeuristicInjectionDetector(),
-      routerInjectionDetector(router),
-    ]),
+    // Local heuristic runs on RAW text (accurate, never leaves the process); the
+    // LLM classifier runs on REDACTED text (never sees raw PII). See IngressGovernor.
+    injection: new HeuristicInjectionDetector(),
+    redactedInjection: routerInjectionDetector(router),
     pii: new RegexPiiRedactor(),
   });
 

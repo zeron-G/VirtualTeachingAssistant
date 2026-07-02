@@ -25,8 +25,13 @@ import type { WorkerServices } from './services.js';
 /** Discord hard-caps a single message at 2000 characters. */
 const DISCORD_MESSAGE_LIMIT = 2000;
 
-/** How many prior thread messages to pull as conversation history for follow-ups. */
-const HISTORY_FETCH_LIMIT = 12;
+/**
+ * How many prior thread messages to pull as conversation history for follow-ups.
+ * Kept at 11 so that with the prepended thread-starter (1) the total is <= core's
+ * MAX_HISTORY_TURNS (12); otherwise core's slice(-12) would drop the starter —
+ * the original question — which is exactly what we fetched it to preserve.
+ */
+const HISTORY_FETCH_LIMIT = 11;
 
 /** Max length of the auto-generated thread title (Discord caps thread names at 100). */
 const THREAD_TITLE_MAX = 90;
@@ -220,7 +225,12 @@ function buildThreadTitle(message: Message): string {
   const author = message.author.username;
   const question = scrubTitle(message.content.replace(/\s+/g, ' ').trim());
   const raw = question === '' ? author : `${author} — ${question}`;
-  return raw.length > THREAD_TITLE_MAX ? `${raw.slice(0, THREAD_TITLE_MAX - 1)}…` : raw;
+  // Truncate on code-point boundaries (not UTF-16 units) so a 90-char cut never
+  // bisects a surrogate pair (emoji/CJK) and leaves a broken glyph.
+  const points = Array.from(raw);
+  return points.length > THREAD_TITLE_MAX
+    ? `${points.slice(0, THREAD_TITLE_MAX - 1).join('')}…`
+    : raw;
 }
 
 /** Remove the highest-risk PII (emails, long digit runs) from a thread title. */

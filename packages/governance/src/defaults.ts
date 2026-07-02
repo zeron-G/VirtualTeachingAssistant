@@ -168,35 +168,6 @@ interface PiiRule {
 }
 
 /**
- * Common "letters + number" tokens that LOOK like a JHED login but are ordinary
- * course vocabulary ("chapter12", "figure3", "week5"). The JHED rule skips these
- * so it doesn't corrupt legitimate answer text. (Presidio's NER would not need
- * this heuristic.)
- */
-const JHED_FALSE_POSITIVE_PREFIXES: ReadonlySet<string> = new Set([
-  // Structural course vocabulary.
-  'chapter', 'chap', 'ch', 'figure', 'fig', 'section', 'sec', 'lab', 'problem',
-  'exercise', 'ex', 'module', 'mod', 'week', 'page', 'pg', 'slide', 'table',
-  'tbl', 'part', 'step', 'unit', 'eq', 'question', 'q', 'answer', 'version', 'v',
-  'vol', 'appendix', 'quiz', 'lecture', 'lec', 'note', 'notes', 'assignment',
-  'hw', 'pset', 'day', 'room', 'fall', 'spring', 'summer', 'winter',
-  // Common (lowercase) subject / course-code and standards prefixes, so tokens
-  // like "cs101" or "econ200" or "ifrs16" are not mistaken for a JHED login.
-  'cs', 'econ', 'mgt', 'mgmt', 'mba', 'bus', 'ba', 'ib', 'math', 'stat', 'stats',
-  'acct', 'acc', 'fin', 'mkt', 'mktg', 'ops', 'orgn', 'bio', 'chem', 'phys',
-  'hist', 'psyc', 'psych', 'engl', 'phil', 'soc', 'poli', 'ee', 'me', 'ense',
-  'ifrs', 'gaap', 'ias', 'iso', 'sfas', 'faq', 'p', 'fig', 'tbl',
-]);
-
-/** True when a JHED-shaped token is really a common course word, e.g. "chapter12". */
-function isJhedFalsePositive(token: string): boolean {
-  const match = /^([a-z]+)\d+$/i.exec(token);
-  const prefix = match?.[1];
-  if (prefix === undefined) return false;
-  return JHED_FALSE_POSITIVE_PREFIXES.has(prefix.toLowerCase());
-}
-
-/**
  * Regex PII rules covering the formats this deployment handles: email addresses,
  * North-American phone numbers, US-SSN-shaped numbers (separated AND compact),
  * and JHED-style institutional ids. All patterns are `g`-flagged.
@@ -226,15 +197,18 @@ const PII_RULES: readonly PiiRule[] = [
   },
   // North-American phone, compact: 10 digits, or 11 starting with 1.
   { pattern: /\b1?\d{10}\b/g, placeholder: '[REDACTED_PHONE]' },
-  // JHED-style login id: LOWERCASE letters + digits (jsmith42). Case-sensitive on
-  // purpose: real JHED logins are lowercase, whereas course codes / standards are
-  // typically upper/mixed case (MGT101, ECON200, IFRS16), so dropping the `i`
-  // flag alone stops the most common false positives. The skip list catches
-  // lowercase course vocabulary ("chapter12", "cs101"). (Presidio NER later.)
+  // JHED-style login id (jsmith42) — redacted ONLY in an IDENTIFIER CONTEXT, i.e.
+  // preceded by a trigger word (jhed / login / username / user / account / netid)
+  // and a separator. This is a zero-width lookbehind, so only the token itself is
+  // replaced. Context-gating is deliberate: a login and a course code / vocabulary
+  // token are structurally identical ("ba12" could be either), so matching on
+  // shape alone either corrupts answers (MGT101, cs101, co2) or leaks real short
+  // logins via a skip list. Gating on context avoids both. Standalone ambiguous
+  // tokens are left alone; robust login/name detection needs NER (Presidio, TODO).
   {
-    pattern: /\b[a-z]{2,8}\d{1,4}\b/g,
+    pattern:
+      /(?<=\b(?:jhed(?:\s?id)?|net\s?id|logins?|logon|usernames?|user|accounts?)\b(?:\s+(?:is|are|=))?[\s:#=-]{0,4})[a-z]{2,8}\d{1,4}\b/gi,
     placeholder: '[REDACTED_JHED]',
-    shouldRedact: (m) => !isJhedFalsePositive(m),
   },
 ];
 

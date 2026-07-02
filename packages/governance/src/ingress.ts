@@ -28,8 +28,21 @@ export const INGRESS_REFUSAL =
 
 /** Dependencies injected into {@link IngressGovernor}. */
 export interface IngressGovernorDeps {
+  /**
+   * LOCAL injection detector, run on the RAW text. Must be in-process (e.g. the
+   * regex heuristic) — it sees un-redacted input, so it must never forward text
+   * to an external service. Running on raw text preserves signature accuracy
+   * (redaction can widen a signature's char gaps and cause a miss).
+   */
   readonly injection: InjectionDetector;
   readonly pii: PiiRedactor;
+  /**
+   * OPTIONAL injection detector run on the REDACTED text — for model-backed
+   * detectors that MUST NOT see raw PII (e.g. the OpenRouter guard.judge). On
+   * error it degrades to the local `injection` result (fail-open for this arm)
+   * rather than blocking every request during a model outage.
+   */
+  readonly redactedInjection?: InjectionDetector;
 }
 
 /** Outcome of an ingress inspection. */
@@ -53,29 +66,33 @@ const STAGE = 'ingress';
 export class IngressGovernor {
   private readonly injection: InjectionDetector;
   private readonly pii: PiiRedactor;
+  private readonly redactedInjection: InjectionDetector | undefined;
 
   constructor(deps: IngressGovernorDeps) {
     this.injection = deps.injection;
     this.pii = deps.pii;
+    this.redactedInjection = deps.redactedInjection;
   }
 
   /**
    * Inspect untrusted inbound text.
    *
-   * Order (PII redaction FIRST — load-bearing for privacy):
-   *   1. PII redaction. On a THROWN error -> block + `flag` (refuse rather than
-   *      risk forwarding raw PII). Runs first so that NOTHING downstream —
-   *      including the LLM-backed injection classifier in step 2 — ever sees raw
-   *      PII (it would otherwise be sent to the external model before redaction).
-   *   2. Injection detection over the REDACTED text. Injection signals are about
-   *      instructions, not PII, so redaction does not weaken detection. On a
-   *      positive detection -> block; on a THROWN error -> block (default-deny).
+   * Order:
+   *   1. PII redaction. On a THROWN error -> block + `flag` (never forward raw PII).
+   *   2. LOCAL injection detection over the RAW text (in-process; raw never leaves
+   *      the process). Run on raw — not redacted — because redaction can widen a
+   *      signature's char-bounded gap and cause a miss. Positive -> block; THROW
+   *      -> block (default-deny).
+   *   3. OPTIONAL model-backed injection detection over the REDACTED text (so an
+   *      external classifier never sees raw PII). Positive -> block; THROW ->
+   *      degrade to step 2's result (flag + allow), not block-everything.
    */
   // `_ctx` is reserved for future per-course injection sensitivity / rules.
   async inspect(text: string, _ctx: GovernanceContext): Promise<IngressDecision> {
     const verdicts: GovernanceVerdict[] = [];
 
-    // (1) Redact PII FIRST, before any model (incl. the injection classifier) sees it.
+    // (1) Redact PII FIRST, so anything sent to an EXTERNAL service (step 3, the
+    // model-backed detector, and the answering model downstream) is redacted.
     let redacted: string;
     try {
       const result = await this.pii.redact(text);
@@ -89,30 +106,42 @@ export class IngressGovernor {
         ),
       );
     } catch (err) {
-      // FAIL-SAFE: cannot guarantee redaction -> do not forward raw text.
       const reason = `PII redactor error (blocking to avoid leaking raw input): ${toError(err).message}`;
       verdicts.push(makeVerdict(STAGE, 'pii.ingress', 'flag', reason));
       return { allow: false, redactedText: '', refusal: INGRESS_REFUSAL, verdicts };
     }
 
-    // (2) Prompt-injection / jailbreak detection over the REDACTED text (fail-safe).
+    // (2) LOCAL injection detection on the RAW text (accurate; stays in-process).
     try {
-      const result = await this.injection.detect(redacted);
+      const result = await this.injection.detect(text);
       if (result.injection) {
-        // A swapped detector's `reason` could echo user text; redact it before it
-        // lands in the FERPA audit log (the audit redaction invariant extends to
-        // verdict reason strings).
         const reason = await this.safeReason(result.reason);
         verdicts.push(makeVerdict(STAGE, 'injection', 'block', reason));
         return { allow: false, redactedText: '', refusal: INGRESS_REFUSAL, verdicts };
       }
-      // Clean input: record an explicit allow so the audit trail is complete.
       verdicts.push(makeVerdict(STAGE, 'injection', 'allow'));
     } catch (err) {
-      // FAIL-SAFE: a detector failure must default-deny, not silently pass.
+      // FAIL-SAFE: a local detector failure must default-deny, not silently pass.
       const reason = `injection detector error (default-deny): ${toError(err).message}`;
       verdicts.push(makeVerdict(STAGE, 'injection', 'flag', reason));
       return { allow: false, redactedText: '', refusal: INGRESS_REFUSAL, verdicts };
+    }
+
+    // (3) OPTIONAL model-backed injection detection on the REDACTED text.
+    if (this.redactedInjection !== undefined) {
+      try {
+        const result = await this.redactedInjection.detect(redacted);
+        if (result.injection) {
+          const reason = await this.safeReason(result.reason);
+          verdicts.push(makeVerdict(STAGE, 'injection.llm', 'block', reason));
+          return { allow: false, redactedText: '', refusal: INGRESS_REFUSAL, verdicts };
+        }
+        verdicts.push(makeVerdict(STAGE, 'injection.llm', 'allow'));
+      } catch (err) {
+        // Degrade to the local heuristic (already passed) rather than block all.
+        const reason = `llm injection detector error (degraded to heuristic): ${toError(err).message}`;
+        verdicts.push(makeVerdict(STAGE, 'injection.llm', 'flag', reason));
+      }
     }
 
     return { allow: true, redactedText: redacted, verdicts };

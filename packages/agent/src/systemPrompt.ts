@@ -22,9 +22,11 @@ import type { AgentInput } from './types.js';
  */
 export function buildSystemPrompt(input: AgentInput): string {
   const locale = input.locale?.trim();
+  // A provided locale is a FORCED language (the caller only sets it when the
+  // course disabled language-mirroring); with no locale we mirror the student.
   const languageDirective =
     locale !== undefined && locale !== ''
-      ? `Reply in the student's language (BCP-47 hint: "${locale}"); mirror the language they wrote in. If unsure, use English.`
+      ? `Always reply in the language with BCP-47 code "${locale}", regardless of the language the student wrote in.`
       : "Reply in the student's language: mirror the language they wrote in. Default to English when unclear.";
 
   return [

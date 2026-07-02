@@ -56,16 +56,33 @@ describe('RegexPiiRedactor', () => {
     expect(redacted).not.toContain('[REDACTED_JHED]');
   });
 
-  it('does NOT redact a lowercase subject-code token like "cs101"', async () => {
-    const text = 'Where are the cs101 lecture slides?';
-    const { redacted } = await redactor.redact(text);
-    expect(redacted).toBe(text);
+  it('does NOT redact lowercase subject-code / science tokens (cs101, co2, phd3)', async () => {
+    for (const text of [
+      'Where are the cs101 lecture slides?',
+      'The value of co2 rises with temperature.',
+      'A phd3 candidate asked about this.',
+    ]) {
+      const { redacted } = await redactor.redact(text);
+      expect(redacted).toBe(text);
+    }
   });
 
-  it('STILL redacts a lowercase JHED-style login (jsmith12)', async () => {
-    const { redacted } = await redactor.redact('Contact the TA jsmith12 for help.');
-    expect(redacted).toContain('[REDACTED_JHED]');
-    expect(redacted).not.toContain('jsmith12');
+  it('redacts a JHED login IN an identifier context (login/username/jhed …)', async () => {
+    for (const text of [
+      'Their JHED is jsmith12, please email them.',
+      'login: ba12 works now',
+      'the username abcd99 is mine',
+    ]) {
+      const { redacted } = await redactor.redact(text);
+      expect(redacted).toContain('[REDACTED_JHED]');
+    }
+  });
+
+  it('does NOT redact an ambiguous token with NO identifier context (avoids both false-pos and skip-list leaks)', async () => {
+    // "ba12" could be a login OR a course code; without context we do not guess.
+    const text = 'See ba12 for the summary.';
+    const { redacted } = await redactor.redact(text);
+    expect(redacted).toBe(text);
   });
 });
 
