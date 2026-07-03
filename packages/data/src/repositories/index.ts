@@ -14,3 +14,5 @@ export type { ChunkInput } from "./MaterialRepository.js";
 export { ChunkRepository } from "./ChunkRepository.js";
 export type { ChunkSearchHit } from "./ChunkRepository.js";
 export { AuditRepository } from "./AuditRepository.js";
+export { UsageRepository } from "./UsageRepository.js";
+export type { UsageSummaryRow } from "./UsageRepository.js";

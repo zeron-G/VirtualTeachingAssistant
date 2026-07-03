@@ -26,6 +26,7 @@ import {
   CourseConfigRepository,
   MembershipRepository,
   UserRepository,
+  UsageRepository,
 } from '@vta/data';
 import type { Db } from '@vta/data';
 import type { ChannelMap as StoredChannelMap, ContentRules as StoredContentRules } from '@vta/data';
@@ -293,6 +294,44 @@ async function cmdCourseList(ctx: Ctx): Promise<void> {
   }
 }
 
+/**
+ * `usage:report [--days N]` — print recorded LLM token usage grouped by model.
+ * With `--days N`, only the last N days are counted; otherwise all-time.
+ */
+async function cmdUsageReport(ctx: Ctx, flags: Record<string, string>): Promise<void> {
+  const repo = new UsageRepository(ctx.db);
+
+  let since: Date | undefined;
+  const daysStr = flags['days'];
+  if (daysStr !== undefined && daysStr !== '') {
+    const days = Number(daysStr);
+    if (!Number.isFinite(days) || days <= 0) {
+      throw new UsageError('--days must be a positive number');
+    }
+    since = new Date(Date.now() - days * 86_400_000);
+  }
+
+  const rows = await repo.summaryByModel(since);
+  const window = since === undefined ? 'all time' : `since ${since.toISOString()}`;
+  if (rows.length === 0) {
+    process.stdout.write(`no LLM usage recorded (${window})\n`);
+    return;
+  }
+
+  process.stdout.write(`LLM token usage (${window}):\n`);
+  process.stdout.write('model\trequests\tinput\toutput\n');
+  let totalReq = 0;
+  let totalIn = 0;
+  let totalOut = 0;
+  for (const r of rows) {
+    totalReq += r.requests;
+    totalIn += r.inputTokens;
+    totalOut += r.outputTokens;
+    process.stdout.write(`${r.model}\t${r.requests}\t${r.inputTokens}\t${r.outputTokens}\n`);
+  }
+  process.stdout.write(`TOTAL\t${totalReq}\t${totalIn}\t${totalOut}\n`);
+}
+
 /* -------------------------------------------------------------------------- */
 /* Usage                                                                      */
 /* -------------------------------------------------------------------------- */
@@ -316,6 +355,10 @@ Commands:
 
   course:list
                       List all registered courses (slug, name, canvasCourseId).
+
+  usage:report        [--days <N>]
+                      Report recorded LLM token usage grouped by model (all time,
+                      or the last N days). Reads the usage_records table.
 
 Required environment:
   DATABASE_URL          Postgres (pgvector) connection string.
@@ -374,6 +417,9 @@ async function main(): Promise<void> {
       break;
     case 'course:list':
       await cmdCourseList(ctx);
+      break;
+    case 'usage:report':
+      await cmdUsageReport(ctx, flags);
       break;
     default:
       throw new UsageError(`unknown command "${command}"`);

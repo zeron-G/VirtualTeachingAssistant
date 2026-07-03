@@ -61,3 +61,26 @@ export class NullUsageSink implements UsageSink {
     /* intentionally empty */
   }
 }
+
+/**
+ * Fan one usage record out to several sinks (e.g. structured logging AND a
+ * persistent DB sink). Per the port contract a sink must not throw; this still
+ * guards defensively so one misbehaving sink can't starve the others.
+ */
+export class CompositeUsageSink implements UsageSink {
+  private readonly sinks: readonly UsageSink[];
+
+  constructor(sinks: readonly UsageSink[]) {
+    this.sinks = sinks;
+  }
+
+  record(r: UsageRecord): void {
+    for (const sink of this.sinks) {
+      try {
+        sink.record(r);
+      } catch {
+        /* a sink must not throw; if one does, keep feeding the rest */
+      }
+    }
+  }
+}

@@ -108,17 +108,17 @@ const PROD_PROFILE: RoleMapping = {
 
 /**
  * OpenRouter profile: route EVERY model call through OpenRouter (one lab key,
- * OpenAI-compatible gateway). Every chat/reasoning role runs on Claude Sonnet 5
- * (`anthropic/claude-sonnet-5`); only the embedding role differs, because
- * Anthropic has no embedding model. Model ids are OpenRouter's namespaced form.
- * The embedding model is the SAME `text-embedding-3-small` (1536 dims) as the
- * OpenAI path, so existing stored chunk vectors remain compatible (no re-ingest).
+ * OpenAI-compatible gateway). The answering agent's PRIMARY runs on Claude Opus
+ * 4.8 (`anthropic/claude-opus-4.8`); the FALLBACK and the utility roles (rerank,
+ * guard.judge) run on the cheaper Claude Sonnet 4.6 (`anthropic/claude-sonnet-4.6`).
+ * Only the embedding role is non-Claude, because Anthropic has no embedding
+ * model. Model ids are OpenRouter's namespaced form. The embedding model is the
+ * SAME `text-embedding-3-small` (1536 dims) as the OpenAI path, so existing
+ * stored chunk vectors remain compatible (no re-ingest).
  *
- * NOTE: `agent.primary` and `agent.fallback` are the same model here — the
- * fallback still absorbs transient upstream errors (SDK retry) and the
- * StaticFallbackAgent remains the ultimate backstop, but it provides no
- * cross-model/provider diversity. Point `agent.fallback` at a different model
- * (e.g. `anthropic/claude-opus-4.8`) if provider-outage diversity is wanted.
+ * Failover is now cross-model (Opus 4.8 → Sonnet 4.6): a genuine downgrade path
+ * if the primary errors, not a same-model retry. rerank/guard.judge sit on the
+ * cheaper Sonnet tier since they are scoring/classification, not answering.
  *
  * NOTE: OpenRouter does NOT proxy OpenAI's `/moderations` or Responses-API web
  * search — those two remain on the OpenAI key (see `@vta/core` composition) and
@@ -127,20 +127,22 @@ const PROD_PROFILE: RoleMapping = {
 const OPENROUTER_ENDPOINT: string =
   process.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1';
 
-/** Claude Sonnet 5 via OpenRouter — the chat/reasoning model for every non-embed role. */
-const OPENROUTER_CHAT_MODEL = 'anthropic/claude-sonnet-5';
+/** Answering-agent primary: Claude Opus 4.8 via OpenRouter. */
+const OPENROUTER_PRIMARY_MODEL = 'anthropic/claude-opus-4.8';
+/** Fallback + utility (rerank/guard) model: cheaper Claude Sonnet 4.6 via OpenRouter. */
+const OPENROUTER_SECONDARY_MODEL = 'anthropic/claude-sonnet-4.6';
 
 const OPENROUTER_PROFILE: RoleMapping = {
   'agent.primary': {
     provider: 'openai-compatible',
-    model: OPENROUTER_CHAT_MODEL,
+    model: OPENROUTER_PRIMARY_MODEL,
     auth: 'apiKey',
     apiKeyName: 'openrouter.api-key',
     endpoint: OPENROUTER_ENDPOINT,
   },
   'agent.fallback': {
     provider: 'openai-compatible',
-    model: OPENROUTER_CHAT_MODEL,
+    model: OPENROUTER_SECONDARY_MODEL,
     auth: 'apiKey',
     apiKeyName: 'openrouter.api-key',
     endpoint: OPENROUTER_ENDPOINT,
@@ -154,14 +156,14 @@ const OPENROUTER_PROFILE: RoleMapping = {
   },
   rerank: {
     provider: 'openai-compatible',
-    model: OPENROUTER_CHAT_MODEL,
+    model: OPENROUTER_SECONDARY_MODEL,
     auth: 'apiKey',
     apiKeyName: 'openrouter.api-key',
     endpoint: OPENROUTER_ENDPOINT,
   },
   'guard.judge': {
     provider: 'openai-compatible',
-    model: OPENROUTER_CHAT_MODEL,
+    model: OPENROUTER_SECONDARY_MODEL,
     auth: 'apiKey',
     apiKeyName: 'openrouter.api-key',
     endpoint: OPENROUTER_ENDPOINT,

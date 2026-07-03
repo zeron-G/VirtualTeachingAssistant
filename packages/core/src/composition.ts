@@ -27,7 +27,9 @@ import {
 import type { SecretsProvider, Logger } from '@vta/shared';
 import { createLogger } from '@vta/shared';
 import type { RoleMapping } from '@vta/llm';
-import { ModelRouter, OpenRouterWebSearch } from '@vta/llm';
+import { CompositeUsageSink, LoggingUsageSink, ModelRouter, OpenRouterWebSearch } from '@vta/llm';
+
+import { DbUsageSink } from './usageSink.js';
 import type { EmbeddingProvider } from '@vta/rag';
 import { RagRetriever } from '@vta/rag';
 import { createDefaultTools } from '@vta/tools';
@@ -88,7 +90,13 @@ export function createTeachingService(config: CoreConfig): TeachingService {
   const db = resolveDb(config);
 
   // --- LLM layer: the single entry point to any model, by logical role. ------
-  const router = new ModelRouter({ mapping: config.mapping, secrets: config.secrets });
+  // Usage is recorded to BOTH the structured log (observability) and the
+  // `usage_records` table (durable token accounting) via a fire-and-forget sink.
+  const router = new ModelRouter({
+    mapping: config.mapping,
+    secrets: config.secrets,
+    usage: new CompositeUsageSink([new LoggingUsageSink(log), new DbUsageSink(db, log)]),
+  });
 
   // The RAG layer needs only an `embed(texts)` capability; adapt the router's
   // `embed` (the `embed` role) to the structural `EmbeddingProvider` port so

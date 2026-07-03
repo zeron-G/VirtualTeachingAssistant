@@ -35,7 +35,7 @@ export type { LlmProfileName } from './config.js';
 export { resolveApiKey } from './auth/apiKey.js';
 
 // Usage accounting
-export { LoggingUsageSink, NullUsageSink } from './usage.js';
+export { LoggingUsageSink, NullUsageSink, CompositeUsageSink } from './usage.js';
 export type { UsageSink, UsageRecord } from './usage.js';
 
 // Providers (exported for advanced/standalone use; the router uses them internally)
