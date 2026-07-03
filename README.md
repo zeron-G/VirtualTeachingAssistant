@@ -242,11 +242,16 @@ gateway with a single key (no direct OpenAI/DeepSeek credentials):
 
 | Role | Purpose | Model (openrouter profile) |
 | --- | --- | --- |
-| `agent.primary` | main reasoning / answers | `deepseek/deepseek-v4-flash` |
-| `agent.fallback` | failover when primary errors | `openai/gpt-5.4-mini` |
+| `agent.primary` | main reasoning / answers | `anthropic/claude-sonnet-5` |
+| `agent.fallback` | failover when primary errors | `anthropic/claude-sonnet-5` |
 | `embed` | retrieval embeddings (1536-dim) | `openai/text-embedding-3-small` |
-| `rerank` | listwise rerank (prompt-based stand-in) | `openai/gpt-5.4-mini` |
-| `guard.judge` | LLM-as-judge for egress content rails | `openai/gpt-5.4-mini` |
+| `rerank` | listwise rerank (prompt-based stand-in) | `anthropic/claude-sonnet-5` |
+| `guard.judge` | LLM-as-judge for egress content rails | `anthropic/claude-sonnet-5` |
+
+Every chat/reasoning role runs on **Claude Sonnet 5**; only `embed` differs
+(Anthropic has no embedding model). `agent.fallback` is the same model as
+`agent.primary` — point it at a different model (e.g. `anthropic/claude-opus-4.8`)
+if you want cross-model failover diversity.
 
 The `dev` and `prod` profiles are alternatives that authenticate each provider
 directly — DeepSeek for primary chat, OpenAI for fallback + embeddings — and are
