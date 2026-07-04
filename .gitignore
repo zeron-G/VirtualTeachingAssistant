@@ -30,3 +30,6 @@ Thumbs.db
 
 # drizzle local artifacts
 packages/data/drizzle/meta/_journal.json.bak
+
+# Next.js build output
+.next/
