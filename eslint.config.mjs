@@ -21,6 +21,10 @@ export default tseslint.config(
       '**/.turbo/**',
       '**/coverage/**',
       '**/drizzle/**',
+      // The Next.js app has its own React/JSX toolchain + type-check; the
+      // workspace flat config is Node/TS-only and would false-positive on it.
+      'apps/web/**',
+      '**/.next/**',
     ],
   },
 
