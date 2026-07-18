@@ -49,11 +49,15 @@ export function createCatalogLookupTool(db: Db): VtaTool<CatalogArgs> {
   return {
     name: 'catalog_lookup',
     description:
-      'List the course materials that exist, optionally filtered by kind ' +
-      "(e.g. 'slides', 'pdf', 'syllabus') and/or a title substring. Use it for " +
-      'structured questions like "what modules are posted?" or "is there a ' +
-      'syllabus?" — for the CONTENTS of a material, use the retrieve tool instead. ' +
-      'Returns each material\'s title, kind, and link (if any).',
+      'List the course materials that EXIST (not their contents), optionally ' +
+      'filtered by `kind` — one of: announcement, assignment, module, page, ' +
+      'syllabus, file — and/or a title substring. Use this for questions about ' +
+      'what is posted or available, e.g. "what are the latest announcements?", ' +
+      '"list the assignments", "what modules are there?", "is there a syllabus?". ' +
+      'This course DOES include announcements and assignments — call this (with the ' +
+      'matching kind) BEFORE telling a student a category is unavailable. Returns ' +
+      "each material's title, kind, and link. For the CONTENTS of a material, use " +
+      'the retrieve tool instead.',
     parameters: catalogParameters,
     async execute(args: CatalogArgs, ctx: ToolContext): Promise<ToolResult> {
       // Tenant predicate first — ALWAYS scoped to ctx.courseId, never to args.

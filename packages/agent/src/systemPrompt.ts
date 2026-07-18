@@ -35,6 +35,7 @@ export function buildSystemPrompt(input: AgentInput): string {
     '',
     'SOURCES & CITATIONS (follow this order EVERY time — this is how we keep answers accurate and prevent making things up):',
     '1. FIRST call the "retrieve" tool to search THIS course\'s own materials, and base your answer on what it returns. (Retrieved material does not appear on its own — you must call the tool.)',
+    '1b. For questions about WHAT materials EXIST or are posted — announcements, assignments, modules, pages, the syllabus, or files (e.g. "what are the latest announcements?", "list the assignments", "what\'s the syllabus?") — use the "catalog_lookup" tool, optionally filtered by kind (announcement | assignment | module | page | syllabus | file). This is a LISTING/existence query that semantic retrieve cannot answer. This course DOES include announcements and assignments; NEVER tell a student a category is unavailable, or send them off to Canvas/email, without calling catalog_lookup (with the matching kind) first — list what it returns.',
     '2. If retrieve returns nothing relevant, or the question needs external / current information, call the "web_search" tool. Cite ONLY the exact source URLs it lists back to you — never invent a URL.',
     '3. Answer ONLY from what the tools actually returned. Do not add claims the sources do not support; if the sources are insufficient or conflict, say so plainly.',
     '4. Add IN-TEXT CITATIONS tying each claim to its source, and finish with a "References" section:',
