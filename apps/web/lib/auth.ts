@@ -1,50 +1,36 @@
 /**
- * Auth core for the VTA dashboard: JHU educational-email verification.
+ * Auth core for the VTA dashboard.
  *
- * The flow is STATELESS — there is no database. Two signed, HttpOnly JWT cookies
- * carry all state:
- *   - `vta_verify`  (short-lived, 10 min): set when a user requests a code; holds
- *                   the target email + a hash of the emailed code. Verified when
- *                   the user submits the code.
- *   - `vta_session` (7 days): set after a successful verification; holds the
- *                   authenticated email + role. This is what gates the dashboard.
+ * Model:
+ *   - Students browse as GUESTS — no login, no session.
+ *   - Professors sign in as ADMIN with an email on an allowlist (`ADMIN_EMAILS`)
+ *     PLUS a shared admin password (`ADMIN_PASSWORD`). A successful login mints a
+ *     signed, HttpOnly session cookie (`vta_session`, jose JWT) carrying the
+ *     professor's email + role. Only professors ever hold a session.
  *
- * Access is restricted to Johns Hopkins educational domains (jhu.edu / jh.edu and
- * their subdomains); everything else is rejected at the request-code step.
+ * There is no database and no email delivery: the session cookie is the only
+ * state, and it is verified with `jose` (edge-safe Web Crypto).
  */
 
 import { SignJWT, jwtVerify } from 'jose';
 
-export const VERIFY_COOKIE = 'vta_verify';
 export const SESSION_COOKIE = 'vta_session';
 
-/** Verification code lifetime (seconds). */
-export const VERIFY_TTL_SECONDS = 10 * 60;
 /** Session lifetime (seconds). */
 export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 
-export type Role = 'student' | 'professor';
+/** Only signed-in professors have a role; guests have no session at all. */
+export type Role = 'professor';
 
 export interface SessionClaims {
   readonly email: string;
   readonly role: Role;
 }
 
-interface VerifyClaims {
-  readonly email: string;
-  /** SHA-256(code + secret), hex. Never store the raw code in the cookie. */
-  readonly codeHash: string;
-}
-
 /* -------------------------------------------------------------------------- */
 /* Secret + config                                                            */
 /* -------------------------------------------------------------------------- */
 
-/**
- * The signing secret. Required in production; in development we fall back to a
- * fixed, clearly-insecure value so the app runs without setup (sessions won't
- * survive a secret change, which is fine locally).
- */
 function secretString(): string {
   const s = process.env.SESSION_SECRET;
   if (s !== undefined && s !== '') return s;
@@ -58,94 +44,49 @@ function secretKey(): Uint8Array {
   return new TextEncoder().encode(secretString());
 }
 
-/** Allowed educational domains (comma-separated env override; JHU by default). */
-export function allowedDomains(): string[] {
-  const raw = process.env.ALLOWED_EMAIL_DOMAINS;
-  const list = (raw !== undefined && raw !== '' ? raw : 'jhu.edu,jh.edu')
-    .split(',')
-    .map((d) => d.trim().toLowerCase())
-    .filter((d) => d !== '');
-  return list;
-}
-
-/** Lowercase + trim an email for consistent comparison/signing. */
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-/** True if `email` belongs to an allowed JHU educational domain (or a subdomain). */
-export function isAllowedEmail(email: string): boolean {
-  const at = email.lastIndexOf('@');
-  if (at <= 0 || at === email.length - 1) return false;
-  const domain = email.slice(at + 1);
-  if (!/^[a-z0-9.-]+$/.test(domain)) return false;
-  return allowedDomains().some((d) => domain === d || domain.endsWith(`.${d}`));
-}
-
-/** Professors are an explicit allowlist (env, comma-separated); everyone else is a student. */
-export function roleFor(email: string): Role {
-  const raw = process.env.PROFESSOR_EMAILS ?? '';
-  const profs = new Set(
+/** The professor/admin allowlist (comma-separated env). Empty ⇒ nobody can log in. */
+function adminEmails(): Set<string> {
+  const raw = process.env.ADMIN_EMAILS ?? '';
+  return new Set(
     raw
       .split(',')
       .map((e) => normalizeEmail(e))
       .filter((e) => e !== ''),
   );
-  return profs.has(normalizeEmail(email)) ? 'professor' : 'student';
 }
 
-/* -------------------------------------------------------------------------- */
-/* Verification codes                                                         */
-/* -------------------------------------------------------------------------- */
-
-/** A cryptographically-random 6-digit code, zero-padded. */
-export function generateCode(): string {
-  const buf = new Uint32Array(1);
-  crypto.getRandomValues(buf);
-  return String((buf[0] ?? 0) % 1_000_000).padStart(6, '0');
-}
-
-/** SHA-256 of the code peppered with the signing secret; hex string. */
-export async function hashCode(code: string): Promise<string> {
-  const data = new TextEncoder().encode(`${code}:${secretString()}`);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-/** Constant-time-ish comparison of two hex hashes of equal length. */
-export function hashesEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+/** Length-safe constant-time string comparison. */
+function constantTimeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  // Compare against max length so the loop count doesn't leak which is longer;
+  // a length mismatch still fails.
+  const len = Math.max(ab.length, bb.length);
+  let diff = ab.length ^ bb.length;
+  for (let i = 0; i < len; i += 1) diff |= (ab[i] ?? 0) ^ (bb[i] ?? 0);
   return diff === 0;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Tokens (jose)                                                              */
-/* -------------------------------------------------------------------------- */
-
-export async function signVerifyToken(email: string, codeHash: string): Promise<string> {
-  return new SignJWT({ email, codeHash } satisfies VerifyClaims)
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime(`${VERIFY_TTL_SECONDS}s`)
-    .sign(secretKey());
+/**
+ * Validate an admin (professor) login. Requires BOTH: the email is on the
+ * allowlist AND the password matches `ADMIN_PASSWORD`. If `ADMIN_PASSWORD` is
+ * unset, login is impossible (fail-closed).
+ */
+export function checkAdminCredentials(email: string, password: string): boolean {
+  const configured = process.env.ADMIN_PASSWORD;
+  if (configured === undefined || configured === '') return false;
+  if (!adminEmails().has(normalizeEmail(email))) return false;
+  return constantTimeEqual(password, configured);
 }
 
-export async function readVerifyToken(token: string | undefined): Promise<VerifyClaims | null> {
-  if (token === undefined || token === '') return null;
-  try {
-    const { payload } = await jwtVerify(token, secretKey());
-    if (typeof payload.email === 'string' && typeof payload.codeHash === 'string') {
-      return { email: payload.email, codeHash: payload.codeHash };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
+/* -------------------------------------------------------------------------- */
+/* Session token (jose)                                                       */
+/* -------------------------------------------------------------------------- */
 
 export async function signSessionToken(claims: SessionClaims): Promise<string> {
   return new SignJWT({ email: claims.email, role: claims.role })
@@ -159,9 +100,8 @@ export async function readSessionToken(token: string | undefined): Promise<Sessi
   if (token === undefined || token === '') return null;
   try {
     const { payload } = await jwtVerify(token, secretKey());
-    const role = payload.role;
-    if (typeof payload.email === 'string' && (role === 'student' || role === 'professor')) {
-      return { email: payload.email, role };
+    if (typeof payload.email === 'string' && payload.role === 'professor') {
+      return { email: payload.email, role: 'professor' };
     }
     return null;
   } catch {
@@ -169,7 +109,7 @@ export async function readSessionToken(token: string | undefined): Promise<Sessi
   }
 }
 
-/** Cookie options shared by both auth cookies. Secure only over HTTPS (prod). */
+/** Cookie options for the session cookie. Secure only over HTTPS (production). */
 export function cookieOptions(maxAgeSeconds: number): {
   httpOnly: true;
   secure: boolean;

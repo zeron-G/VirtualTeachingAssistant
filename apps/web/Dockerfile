@@ -6,8 +6,9 @@
 #   docker build -f apps/web/Dockerfile -t vta-web:<tag> .
 #
 # Runtime config is entirely via environment variables / secrets:
-#   SESSION_SECRET (required), RESEND_API_KEY + RESEND_FROM (optional; without a
-#   key the code is logged instead of emailed), PROFESSOR_EMAILS, ALLOWED_EMAIL_DOMAINS.
+#   SESSION_SECRET (required, session signing), ADMIN_EMAILS (professor allowlist,
+#   comma-separated), ADMIN_PASSWORD (shared instructor sign-in password).
+#   Students browse as guests with no login.
 
 # ----------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS build
