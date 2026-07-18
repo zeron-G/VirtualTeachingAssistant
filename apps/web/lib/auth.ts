@@ -99,11 +99,16 @@ export async function signSessionToken(claims: SessionClaims): Promise<string> {
 export async function readSessionToken(token: string | undefined): Promise<SessionClaims | null> {
   if (token === undefined || token === '') return null;
   try {
-    const { payload } = await jwtVerify(token, secretKey());
-    if (typeof payload.email === 'string' && payload.role === 'professor') {
-      return { email: payload.email, role: 'professor' };
-    }
-    return null;
+    // Pin the algorithm (defense-in-depth against alg-confusion, though the
+    // symmetric key already precludes it).
+    const { payload } = await jwtVerify(token, secretKey(), { algorithms: ['HS256'] });
+    if (typeof payload.email !== 'string' || payload.role !== 'professor') return null;
+    // Re-validate against the CURRENT allowlist on every read, so removing an
+    // email from ADMIN_EMAILS de-authorizes outstanding sessions immediately
+    // rather than waiting up to the 7-day TTL. (To revoke ALL sessions at once,
+    // rotate SESSION_SECRET.)
+    if (!adminEmails().has(normalizeEmail(payload.email))) return null;
+    return { email: payload.email, role: 'professor' };
   } catch {
     return null;
   }
