@@ -1,0 +1,95 @@
+name: web-build-deploy
+
+# CI/CD for the VTA web dashboard (apps/web). Same shape as build-and-deploy.yml
+# (the worker): BUILD + push the image here on GitHub's runners with ACR admin
+# credentials (data-plane only); the DEPLOY job is SKIPPED until a subscription
+# Owner grants the federated managed identity a role and AUTO_DEPLOY is flipped
+# to "true" (see build-and-deploy.yml header). Until then, rollout is a one-line
+# local command.
+#
+# Reuses repo variables ACR_LOGIN_SERVER / AZURE_RESOURCE_GROUP and secrets
+# ACR_USERNAME / ACR_PASSWORD; adds WEB_IMAGE_NAME / WEB_CONTAINER_APP_NAME.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'pnpm-lock.yaml'
+      - '.dockerignore'
+      - '.github/workflows/web-build-deploy.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: web-build-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ${{ vars.ACR_LOGIN_SERVER }}
+  IMAGE: ${{ vars.WEB_IMAGE_NAME }}
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  CONTAINER_APP: ${{ vars.WEB_CONTAINER_APP_NAME }}
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "### :globe_with_meridians: Web image pushed to ACR"
+            echo ""
+            echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}\`"
+            echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE }}:latest\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: build-push
+    runs-on: ubuntu-latest
+    # SKIPPED until the federated managed identity is granted a role and
+    # AUTO_DEPLOY is set to "true".
+    if: ${{ vars.AUTO_DEPLOY == 'true' }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Azure login (OIDC, user-assigned managed identity)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Roll the web Container App to the new image
+        uses: azure/cli@v2
+        with:
+          azcliversion: latest
+          inlineScript: |
+            az containerapp update \
+              -n "${{ env.CONTAINER_APP }}" \
+              -g "${{ env.RESOURCE_GROUP }}" \
+              --image "${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}"
