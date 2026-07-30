@@ -25,9 +25,11 @@ WORKDIR /repo
 COPY . .
 
 RUN pnpm install --frozen-lockfile
-# Build just the web app. Next 'standalone' output lands under
-# apps/web/.next/standalone with the monorepo path layout preserved.
-RUN pnpm --filter=@vta/web build
+# Build the web app AND the workspace packages it depends on (the trailing
+# `...` includes dependencies) — @vta/data must be compiled to dist/ first.
+# Next 'standalone' output lands under apps/web/.next/standalone with the
+# monorepo path layout preserved.
+RUN pnpm --filter=@vta/web... build
 
 # ----------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS runtime

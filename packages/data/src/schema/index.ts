@@ -11,3 +11,4 @@ export * from "./courseConfig.js";
 export * from "./materials.js";
 export * from "./audit.js";
 export * from "./usage.js";
+export * from "./debate.js";

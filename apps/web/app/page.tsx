@@ -45,6 +45,13 @@ export default async function DashboardHome() {
             </p>
             <div className="grid">
               <section className="card">
+                <h3>Classroom debate</h3>
+                <p>Run a red vs blue debate. Students join by QR — no account needed.</p>
+                <a className="link" href="/debate" style={{ display: 'inline-block', marginTop: 12 }}>
+                  Open →
+                </a>
+              </section>
+              <section className="card">
                 <h3>Connect Canvas</h3>
                 <p>Authorize a course so the assistant can read its materials.</p>
                 <span className="soon">Coming soon</span>

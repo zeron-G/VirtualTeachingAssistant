@@ -1,0 +1,109 @@
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+import { debateRepo } from '@/lib/db';
+import { publish } from '@/lib/hub';
+import {
+  PARTICIPANT_COOKIE,
+  PARTICIPANT_TTL_SECONDS,
+  generateDeviceId,
+  participantCookieOptions,
+  readParticipantToken,
+  signParticipantToken,
+} from '@/lib/participant';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+const MAX_NAME = 40;
+const TEAMS = new Set(['red', 'blue', 'observer']);
+
+/**
+ * POST /api/debate/join { code, name, team, consent }
+ *
+ * Students type their own name — this is a classroom game, not an authentication
+ * claim. `consent` must be true: nothing is recorded for a participant without
+ * a consent timestamp (Maryland is an all-party-consent state, and the
+ * push-to-talk design means a student only ever records themselves).
+ *
+ * Re-joining from the same device resumes the existing seat instead of creating
+ * a duplicate, so a refresh or a dropped connection is harmless.
+ */
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  let code: string;
+  let name: string;
+  let team: string;
+  let consent: boolean;
+  try {
+    const body: unknown = await req.json();
+    const b = body as Record<string, unknown>;
+    code = String(b.code ?? '').trim().toUpperCase();
+    name = String(b.name ?? '').trim().slice(0, MAX_NAME);
+    team = String(b.team ?? 'observer').trim();
+    consent = b.consent === true;
+  } catch {
+    return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
+  }
+
+  if (code === '' || name === '') {
+    return NextResponse.json({ error: 'A join code and your name are required.' }, { status: 400 });
+  }
+  if (!TEAMS.has(team)) team = 'observer';
+  if (!consent) {
+    return NextResponse.json(
+      { error: 'You must agree to the recording notice to take part.' },
+      { status: 400 },
+    );
+  }
+
+  const repo = debateRepo();
+  const session = await repo.getSessionByJoinCode(code);
+  if (session === undefined) {
+    return NextResponse.json({ error: 'No activity found for that code.' }, { status: 404 });
+  }
+  if (session.status === 'ended') {
+    return NextResponse.json({ error: 'That activity has ended.' }, { status: 410 });
+  }
+
+  // Resume the same seat if this device already joined this session.
+  const existing = await readParticipantToken(req.cookies.get(PARTICIPANT_COOKIE)?.value);
+  let participant =
+    existing !== null && existing.sessionId === session.id
+      ? await repo.findParticipantByDevice(session.id, existing.deviceId)
+      : undefined;
+
+  const deviceId = participant?.deviceId ?? existing?.deviceId ?? generateDeviceId();
+
+  if (participant === undefined) {
+    participant = await repo.addParticipant({
+      sessionId: session.id,
+      displayName: name,
+      team,
+      deviceId,
+      consentAt: new Date(),
+    });
+  } else {
+    participant =
+      (await repo.updateParticipant(participant.id, {
+        displayName: name,
+        team,
+        consentAt: participant.consentAt ?? new Date(),
+      })) ?? participant;
+  }
+
+  const token = await signParticipantToken({
+    sessionId: session.id,
+    participantId: participant.id,
+    deviceId,
+  });
+
+  publish(session.id);
+  const res = NextResponse.json({
+    ok: true,
+    sessionId: session.id,
+    participant,
+    topic: session.topic,
+  });
+  res.cookies.set(PARTICIPANT_COOKIE, token, participantCookieOptions(PARTICIPANT_TTL_SECONDS));
+  return res;
+}

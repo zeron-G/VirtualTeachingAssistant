@@ -15,6 +15,7 @@ on:
     branches: [main]
     paths:
       - 'apps/web/**'
+      - 'packages/**'
       - 'pnpm-lock.yaml'
       - '.dockerignore'
       - '.github/workflows/web-build-deploy.yml'
