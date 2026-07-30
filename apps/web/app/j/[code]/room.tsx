@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 
 import { useDebateStream } from '@/lib/useDebateStream';
@@ -28,13 +28,16 @@ export function Room({
   sessionId,
   topic,
   ended,
+  resumeParticipantId = null,
 }: {
   code: string;
   sessionId: string;
   topic: string;
   ended: boolean;
+  /** Set when a valid participant cookie already exists — skip the join form. */
+  resumeParticipantId?: string | null;
 }) {
-  const [participantId, setParticipantId] = useState<string | null>(null);
+  const [participantId, setParticipantId] = useState<string | null>(resumeParticipantId);
   const [name, setName] = useState('');
   const [team, setTeam] = useState<Team>('red');
   const [consent, setConsent] = useState(false);
@@ -176,17 +179,44 @@ function LiveRoom({ sessionId, participantId }: { sessionId: string; participant
   const [note, setNote] = useState<string | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
+  /**
+   * Synchronous record of INTENT. `startRecording` is async (getUserMedia), and
+   * the very first press always resolves AFTER the finger lifts — the student
+   * has to release the button to tap "Allow" on the permission prompt. Without
+   * this guard the mic would open with nobody holding the button and keep
+   * recording the room. Every async continuation re-checks the generation.
+   */
+  const wantRef = useRef(false);
+  const genRef = useRef(0);
+  const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Hard ceiling so a stuck button can never record indefinitely. */
+  const MAX_TURN_MS = 3 * 60 * 1000;
+
+  const hardStop = useCallback((): void => {
+    wantRef.current = false;
+    genRef.current += 1;
+    if (maxTimerRef.current !== null) {
+      clearTimeout(maxTimerRef.current);
+      maxTimerRef.current = null;
+    }
+    const rec = recorderRef.current;
+    if (rec !== null && rec.state === 'recording') rec.stop();
+    else rec?.stream.getTracks().forEach((t) => t.stop());
+    setRecording(false);
+  }, []);
 
   // Losing the floor mid-sentence must stop the mic immediately.
   useEffect(() => {
-    if (!hasFloor && recorderRef.current !== null && recorderRef.current.state === 'recording') {
-      recorderRef.current.stop();
-    }
-  }, [hasFloor]);
+    if (!hasFloor) hardStop();
+  }, [hasFloor, hardStop]);
 
   // Never leave a live microphone behind on unmount.
   useEffect(() => {
     return () => {
+      wantRef.current = false;
+      genRef.current += 1;
+      if (maxTimerRef.current !== null) clearTimeout(maxTimerRef.current);
       const rec = recorderRef.current;
       if (rec !== null && rec.state === 'recording') rec.stop();
       rec?.stream.getTracks().forEach((t) => t.stop());
@@ -194,11 +224,20 @@ function LiveRoom({ sessionId, participantId }: { sessionId: string; participant
   }, []);
 
   async function startRecording() {
+    if (wantRef.current) return; // re-entrant press: ignore
     setNote(null);
+    wantRef.current = true;
+    const gen = ++genRef.current;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
       });
+      // The button was released (or the floor was revoked) while we waited:
+      // close the tracks and NEVER start — this is the hot-mic guard.
+      if (!wantRef.current || gen !== genRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       chunksRef.current = [];
       const rec = new MediaRecorder(stream);
       rec.ondataavailable = (e) => {
@@ -206,20 +245,36 @@ function LiveRoom({ sessionId, participantId }: { sessionId: string; participant
       };
       rec.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
+        if (maxTimerRef.current !== null) {
+          clearTimeout(maxTimerRef.current);
+          maxTimerRef.current = null;
+        }
         const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' });
         chunksRef.current = [];
+        recorderRef.current = null;
         void upload(blob);
       };
       recorderRef.current = rec;
       rec.start();
       setRecording(true);
+      maxTimerRef.current = setTimeout(() => {
+        setNote('Turn ended automatically after 3 minutes.');
+        hardStop();
+      }, MAX_TURN_MS);
     } catch {
+      wantRef.current = false;
       setNote('Could not open the microphone. Check the permission prompt in your browser.');
     }
   }
 
   function stopRecording() {
+    // Clear intent FIRST so an in-flight getUserMedia aborts itself.
+    wantRef.current = false;
     setRecording(false);
+    if (maxTimerRef.current !== null) {
+      clearTimeout(maxTimerRef.current);
+      maxTimerRef.current = null;
+    }
     const rec = recorderRef.current;
     if (rec !== null && rec.state === 'recording') rec.stop();
   }
@@ -297,9 +352,16 @@ function LiveRoom({ sessionId, participantId }: { sessionId: string; participant
         {hasFloor ? (
           <button
             type="button"
-            onPointerDown={() => void startRecording()}
+            onPointerDown={(e) => {
+              // Keep receiving pointerup even if the finger slides off the button.
+              e.currentTarget.setPointerCapture?.(e.pointerId);
+              void startRecording();
+            }}
             onPointerUp={stopRecording}
-            onPointerLeave={() => recording && stopRecording()}
+            // iOS fires pointercancel on scroll / call / notification — without
+            // this the mic would stay open.
+            onPointerCancel={stopRecording}
+            onLostPointerCapture={stopRecording}
             disabled={uploading}
             style={{
               width: '100%',

@@ -28,9 +28,21 @@ export function Console({
   qrDataUrl: string;
   professorEmail: string;
 }) {
-  const snapshot = useDebateStream(initial.session.id, initial);
-  const { session, participants, turns, judgement } = snapshot;
+  const streamed = useDebateStream(initial.session.id, initial);
+  /**
+   * The POST /state response is authoritative and arrives BEFORE the SSE frame.
+   * Track its phaseSeq locally: relying on SSE alone means a second click sends
+   * a stale seq, the compare-and-set matches no row, and every later action is
+   * wedged into a permanent 409.
+   */
+  const [localSeq, setLocalSeq] = useState<number | null>(null);
+  const snapshot = streamed;
+  const { participants, turns, judgement } = snapshot;
+  const session = snapshot.session;
+  const effectiveSeq = Math.max(session.phaseSeq, localSeq ?? -1);
+
   const [busy, setBusy] = useState(false);
+  const [judging, setJudging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showQr, setShowQr] = useState(true);
 
@@ -38,29 +50,41 @@ export function Console({
     async (body: Record<string, unknown>) => {
       setBusy(true);
       setError(null);
-      const res = await fetch(`/api/debate/sessions/${session.id}/state`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, phaseSeq: session.phaseSeq }),
-      });
-      if (!res.ok) {
-        const d = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(d.error ?? 'That did not work.');
+      try {
+        const res = await fetch(`/api/debate/sessions/${session.id}/state`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...body, phaseSeq: effectiveSeq }),
+        });
+        const d = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          session?: { phaseSeq: number };
+        };
+        if (!res.ok) setError(d.error ?? 'That did not work.');
+        else if (d.session !== undefined) setLocalSeq(d.session.phaseSeq);
+      } catch {
+        setError('Network problem — check your connection and try again.');
+      } finally {
+        setBusy(false);
       }
-      setBusy(false);
     },
-    [session.id, session.phaseSeq],
+    [session.id, effectiveSeq],
   );
 
   async function runJudge() {
-    setBusy(true);
+    setJudging(true);
     setError(null);
-    const res = await fetch(`/api/debate/sessions/${session.id}/judge`, { method: 'POST' });
-    if (!res.ok) {
-      const d = (await res.json().catch(() => ({}))) as { error?: string };
-      setError(d.error ?? 'The judge could not run.');
+    try {
+      const res = await fetch(`/api/debate/sessions/${session.id}/judge`, { method: 'POST' });
+      if (!res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(d.error ?? 'The judge could not run.');
+      }
+    } catch {
+      setError('Network problem running the judge.');
+    } finally {
+      setJudging(false);
     }
-    setBusy(false);
   }
 
   async function confirmJudge(judgementId: string) {
@@ -95,11 +119,30 @@ export function Console({
       </header>
 
       <main className="container" style={{ maxWidth: 1100 }}>
-        <h1 style={{ marginBottom: 4 }}>{session.topic}</h1>
-        <p className="sub">
-          Phase: <strong>{session.phase}</strong> · {participants.length} joined · {turns.length}{' '}
-          turns
-        </p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start' }}>
+          <div>
+            <h1 style={{ marginBottom: 4 }}>{session.topic}</h1>
+            <p className="sub">
+              Phase: <strong>{session.phase}</strong> · {participants.length} joined ·{' '}
+              {turns.length} turns
+            </p>
+          </div>
+          {session.status !== 'ended' && (
+            <button
+              type="button"
+              className="link"
+              disabled={busy}
+              onClick={() => {
+                if (window.confirm('End this debate? Students will no longer be able to speak.')) {
+                  void patch({ endNow: true });
+                }
+              }}
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              End debate
+            </button>
+          )}
+        </div>
         {error !== null && <p className="error">{error}</p>}
 
         {/* ---- Join panel ---- */}
@@ -134,7 +177,12 @@ export function Console({
                 key={p}
                 type="button"
                 disabled={busy}
-                onClick={() => void patch({ phase: p, status: p === 'Lobby' ? 'lobby' : 'live' })}
+                onClick={() =>
+                  void patch({
+                    phase: p,
+                    status: p === 'Lobby' ? 'lobby' : p === 'Judging' ? 'judging' : 'live',
+                  })
+                }
                 className="link"
                 style={{
                   padding: '7px 12px',
@@ -235,8 +283,8 @@ export function Console({
         <section className="card" style={{ marginTop: 16, marginBottom: 40 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ margin: 0 }}>AI judge</h3>
-            <button className="link" type="button" disabled={busy} onClick={() => void runJudge()}>
-              {busy ? 'Working…' : 'Run judge'}
+            <button className="link" type="button" disabled={judging} onClick={() => void runJudge()}>
+              {judging ? 'Working…' : 'Run judge'}
             </button>
           </div>
           <p className="sub" style={{ marginTop: 6 }}>

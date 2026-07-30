@@ -48,15 +48,48 @@ export function useDebateStream(sessionId: string, initial: Snapshot): Snapshot 
   const [snapshot, setSnapshot] = useState<Snapshot>(initial);
 
   useEffect(() => {
-    const source = new EventSource(`/api/debate/sessions/${sessionId}/stream`);
-    source.addEventListener('snapshot', (e) => {
-      try {
-        setSnapshot(JSON.parse((e as MessageEvent<string>).data) as Snapshot);
-      } catch {
-        /* ignore a malformed frame; the next one supersedes it */
+    let source: EventSource | null = null;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
+
+    const connect = (): void => {
+      if (stopped) return;
+      source?.close();
+      source = new EventSource(`/api/debate/sessions/${sessionId}/stream`);
+      source.addEventListener('snapshot', (e) => {
+        try {
+          setSnapshot(JSON.parse((e as MessageEvent<string>).data) as Snapshot);
+        } catch {
+          /* ignore a malformed frame; the next one supersedes it */
+        }
+      });
+      // EventSource retries on its own, but not from CLOSED (which is where a
+      // phone that slept, or a 404/500, lands). Reconnect explicitly.
+      source.onerror = () => {
+        if (stopped) return;
+        if (source?.readyState === EventSource.CLOSED) {
+          if (retry !== null) clearTimeout(retry);
+          retry = setTimeout(connect, 2000);
+        }
+      };
+    };
+
+    // A backgrounded phone can miss frames; resync when it comes back.
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible' && source?.readyState !== EventSource.OPEN) {
+        connect();
       }
-    });
-    return () => source.close();
+    };
+
+    connect();
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      stopped = true;
+      document.removeEventListener('visibilitychange', onVisible);
+      if (retry !== null) clearTimeout(retry);
+      source?.close();
+    };
   }, [sessionId]);
 
   return snapshot;

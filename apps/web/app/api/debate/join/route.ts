@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 
 import { debateRepo } from '@/lib/db';
 import { publish } from '@/lib/hub';
+import { allow, clientIp } from '@/lib/rateLimit';
 import {
   PARTICIPANT_COOKIE,
   PARTICIPANT_TTL_SECONDS,
@@ -29,7 +30,16 @@ const TEAMS = new Set(['red', 'blue', 'observer']);
  * Re-joining from the same device resumes the existing seat instead of creating
  * a duplicate, so a refresh or a dropped connection is harmless.
  */
+/** A classroom is tens of people, not thousands. */
+const MAX_PARTICIPANTS = 200;
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  // The join code is projected on a screen; keep one device from spamming the
+  // roster (and the SSE fan-out) with it.
+  if (!allow(`join:${clientIp(req.headers)}`, 10, 60_000)) {
+    return NextResponse.json({ error: 'Too many attempts. Wait a moment.' }, { status: 429 });
+  }
+
   let code: string;
   let name: string;
   let team: string;
@@ -75,13 +85,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const deviceId = participant?.deviceId ?? existing?.deviceId ?? generateDeviceId();
 
   if (participant === undefined) {
-    participant = await repo.addParticipant({
-      sessionId: session.id,
-      displayName: name,
-      team,
-      deviceId,
-      consentAt: new Date(),
-    });
+    if ((await repo.listParticipants(session.id)).length >= MAX_PARTICIPANTS) {
+      return NextResponse.json({ error: 'This activity is full.' }, { status: 409 });
+    }
+    try {
+      participant = await repo.addParticipant({
+        sessionId: session.id,
+        displayName: name,
+        team,
+        deviceId,
+        consentAt: new Date(),
+      });
+    } catch {
+      // Lost a race against a concurrent join from the same device — the unique
+      // index on (session_id, device_id) is the source of truth; adopt the row.
+      participant = await repo.findParticipantByDevice(session.id, deviceId);
+      if (participant === undefined) {
+        return NextResponse.json({ error: 'Could not join. Try again.' }, { status: 500 });
+      }
+    }
   } else {
     participant =
       (await repo.updateParticipant(participant.id, {

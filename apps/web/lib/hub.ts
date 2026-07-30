@@ -50,3 +50,45 @@ export function publish(sessionId: string): void {
     }
   }
 }
+
+/* -------------------------------------------------------------------------- */
+/* Recently-held floor                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A student's clip is uploaded only AFTER they stop speaking, so a professor who
+ * advances the phase in that instant would otherwise get the upload rejected and
+ * the entire speech thrown away. We therefore remember who just held the floor
+ * for a short grace period and still accept their clip.
+ *
+ * In-memory and single-replica (same constraint as the hub); losing it on
+ * restart degrades to the old behaviour — a 403 — never to mis-attribution,
+ * because the key is still the authenticated participant.
+ */
+const GRACE_MS = 120_000;
+
+const globalForFloor = globalThis as unknown as {
+  __vtaRecentFloor?: Map<string, number>;
+};
+
+function recent(): Map<string, number> {
+  globalForFloor.__vtaRecentFloor ??= new Map();
+  return globalForFloor.__vtaRecentFloor;
+}
+
+/** Record that `participantId` held the floor in `sessionId` up to now. */
+export function noteFloorHeld(sessionId: string, participantId: string): void {
+  const map = recent();
+  map.set(`${sessionId}:${participantId}`, Date.now() + GRACE_MS);
+  // Opportunistic sweep so the map cannot grow without bound.
+  if (map.size > 500) {
+    const now = Date.now();
+    for (const [k, exp] of map) if (exp < now) map.delete(k);
+  }
+}
+
+/** True if this participant holds, or very recently held, the floor. */
+export function heldFloorRecently(sessionId: string, participantId: string): boolean {
+  const exp = recent().get(`${sessionId}:${participantId}`);
+  return exp !== undefined && exp > Date.now();
+}

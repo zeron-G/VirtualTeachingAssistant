@@ -2,9 +2,10 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 import { debateRepo } from '@/lib/db';
-import { publish } from '@/lib/hub';
+import { heldFloorRecently, publish } from '@/lib/hub';
 import { PARTICIPANT_COOKIE, readParticipantToken } from '@/lib/participant';
 import { transcribe } from '@/lib/openrouter';
+import { allow } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -40,8 +41,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (participant.consentAt === null) {
     return NextResponse.json({ error: 'Recording consent is required.' }, { status: 403 });
   }
-  if (session.floorParticipantId !== participant.id) {
+  // Accept from the current holder, OR from whoever just held it — the clip is
+  // uploaded after they stop speaking, so a phase change in that instant must
+  // not throw the whole speech away. Attribution is unaffected: the speaker is
+  // still taken from the authenticated participant, never from the request.
+  if (
+    session.floorParticipantId !== participant.id &&
+    !heldFloorRecently(session.id, participant.id)
+  ) {
     return NextResponse.json({ error: 'You do not have the floor.' }, { status: 403 });
+  }
+
+  // Every accepted clip is a paid Whisper call on the shared OpenRouter key
+  // (which also serves the production Discord bot) — cap the rate per speaker.
+  if (!allow(`turn:${participant.id}`, 12, 60_000)) {
+    return NextResponse.json({ error: 'Slow down a moment, then try again.' }, { status: 429 });
+  }
+
+  // Reject oversized uploads BEFORE buffering the body into memory.
+  const declared = Number(req.headers.get('content-length') ?? '0');
+  if (Number.isFinite(declared) && declared > MAX_CLIP_BYTES) {
+    return NextResponse.json({ error: 'That clip is too long.' }, { status: 413 });
   }
 
   let audio: File | null = null;

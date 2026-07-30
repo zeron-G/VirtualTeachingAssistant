@@ -1,4 +1,14 @@
-import { pgTable, uuid, text, integer, jsonb, timestamp, index, boolean } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  uuid,
+  text,
+  integer,
+  jsonb,
+  timestamp,
+  index,
+  uniqueIndex,
+  boolean,
+} from "drizzle-orm/pg-core";
 import { courses } from "./courses.js";
 
 /**
@@ -73,6 +83,12 @@ export const debateParticipants = pgTable(
   },
   (t) => ({
     sessionIdx: index("debate_participants_session_idx").on(t.sessionId),
+    // One seat per device per session — makes the resume path atomic and stops
+    // a refresh/rejoin from creating duplicate people in the roster.
+    deviceUnique: uniqueIndex("debate_participants_session_device_uq").on(
+      t.sessionId,
+      t.deviceId,
+    ),
   }),
 );
 

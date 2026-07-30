@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 
 import { debateRepo } from '@/lib/db';
 import { subscribe } from '@/lib/hub';
+import { sharedSnapshot } from '@/lib/snapshot';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -14,73 +15,44 @@ export const dynamic = 'force-dynamic';
  * reconnects on its own. Each event carries a FULL snapshot, so a reconnect
  * needs no replay log — the next snapshot is the whole truth.
  *
- * Readable by anyone with the session id: the transcript is shown to the whole
- * classroom on the projector anyway. Write paths are all authenticated.
+ * Readable by anyone with the session id: the transcript is on the classroom
+ * projector anyway. All WRITE paths are authenticated.
  */
 export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await ctx.params;
-  const repo = debateRepo();
+
+  // Resolve BEFORE opening a stream: an unknown/garbage id must 404 rather than
+  // pin an open socket, a timer and a subscription on the single replica.
+  if (!/^[0-9a-f-]{36}$/i.test(id)) {
+    return new Response('Not found', { status: 404 });
+  }
+  const exists = await debateRepo().getSession(id);
+  if (exists === undefined) {
+    return new Response('Not found', { status: 404 });
+  }
 
   const encoder = new TextEncoder();
   let unsubscribe: (() => void) | undefined;
   let keepalive: ReturnType<typeof setInterval> | undefined;
   let closed = false;
+  let cleanup = (): void => {
+    closed = true;
+  };
 
   const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const send = (event: string, payload: unknown): void => {
-        if (closed) return;
-        try {
-          controller.enqueue(
-            encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`),
-          );
-        } catch {
-          /* client went away between checks */
-        }
-      };
-
-      // Coalesce bursts (e.g. a turn insert + a floor change) into one push.
-      let pending = false;
-      const pushSnapshot = async (): Promise<void> => {
-        if (closed || pending) return;
-        pending = true;
-        try {
-          const snapshot = await repo.snapshot(id);
-          if (snapshot === undefined) {
-            send('gone', { error: 'session not found' });
-            return;
-          }
-          send('snapshot', snapshot);
-        } catch {
-          /* transient DB hiccup — the next event or keepalive retries */
-        } finally {
-          pending = false;
-        }
-      };
-
-      await pushSnapshot();
-      unsubscribe = subscribe(id, () => {
-        void pushSnapshot();
-      });
-
-      // Comment frames keep proxies from idling the connection out.
-      keepalive = setInterval(() => {
-        if (closed) return;
-        try {
-          controller.enqueue(encoder.encode(': keepalive\n\n'));
-        } catch {
-          /* ignore */
-        }
-      }, 20_000);
-
-      const cleanup = (): void => {
+    start(controller) {
+      // Registered FIRST and idempotent: a client that disconnects during the
+      // very first snapshot query must not leak the subscription or the timer.
+      cleanup = () => {
         if (closed) return;
         closed = true;
         unsubscribe?.();
+        unsubscribe = undefined;
         if (keepalive !== undefined) clearInterval(keepalive);
+        keepalive = undefined;
         try {
           controller.close();
         } catch {
@@ -88,11 +60,77 @@ export async function GET(
         }
       };
       req.signal.addEventListener('abort', cleanup);
+
+      const send = (event: string, payload: unknown): boolean => {
+        if (closed) return false;
+        try {
+          // Backpressure: if the socket isn't draining, skip this frame — the
+          // next full snapshot supersedes it (that's the point of snapshots).
+          if (controller.desiredSize !== null && controller.desiredSize <= 0) return false;
+          controller.enqueue(
+            encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`),
+          );
+          return true;
+        } catch {
+          cleanup();
+          return false;
+        }
+      };
+
+      // Real coalescer WITH a trailing edge: a publish that lands while a query
+      // is in flight sets `again`, and the loop re-reads once it completes.
+      // (The previous boolean guard silently DROPPED those events, leaving
+      // clients permanently stale with nothing to recover them.)
+      let running = false;
+      let again = false;
+      const push = async (): Promise<void> => {
+        if (closed) return;
+        if (running) {
+          again = true;
+          return;
+        }
+        running = true;
+        try {
+          do {
+            again = false;
+            const snapshot = await sharedSnapshot(id);
+            if (closed) return;
+            if (snapshot === undefined) {
+              send('gone', { error: 'session not found' });
+              cleanup();
+              return;
+            }
+            send('snapshot', snapshot);
+          } while (again && !closed);
+        } catch {
+          // Transient DB hiccup — retry on the next publish or keepalive.
+          again = false;
+        } finally {
+          running = false;
+        }
+      };
+
+      // Subscribe BEFORE the first read so nothing committed during that query
+      // is missed (it just queues a trailing re-read).
+      unsubscribe = subscribe(id, () => {
+        void push();
+      });
+      void push();
+
+      // Comment frames stop proxies idling the connection out.
+      keepalive = setInterval(() => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(': keepalive\n\n'));
+        } catch {
+          cleanup();
+        }
+      }, 20_000);
+
+      if (req.signal.aborted) cleanup();
     },
     cancel() {
-      closed = true;
-      unsubscribe?.();
-      if (keepalive !== undefined) clearInterval(keepalive);
+      cleanup();
     },
   });
 
@@ -101,7 +139,6 @@ export async function GET(
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
-      // Defensive: stop any intermediary from buffering the stream.
       'X-Accel-Buffering': 'no',
     },
   });

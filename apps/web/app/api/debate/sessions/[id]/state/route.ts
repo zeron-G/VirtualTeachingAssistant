@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 
 import { SESSION_COOKIE, readSessionToken } from '@/lib/auth';
 import { debateRepo } from '@/lib/db';
-import { publish } from '@/lib/hub';
+import { noteFloorHeld, publish } from '@/lib/hub';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -60,6 +60,16 @@ export async function POST(
     patch.status = 'ended';
     patch.endedAt = new Date();
     patch.floorParticipantId = null;
+  }
+
+  // Whoever is losing the floor keeps a short grace window to upload the clip
+  // they just finished recording (see heldFloorRecently in lib/hub.ts).
+  if (
+    patch.floorParticipantId !== undefined &&
+    session.floorParticipantId !== null &&
+    session.floorParticipantId !== patch.floorParticipantId
+  ) {
+    noteFloorHeld(id, session.floorParticipantId);
   }
 
   const updated = await repo.updateSessionState(id, expected, patch);
