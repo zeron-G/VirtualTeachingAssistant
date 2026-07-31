@@ -10,14 +10,29 @@ import { generateJoinCode } from '@/lib/participant';
 /** Ids are fixed and positional so colours/labels stay stable if renamed. */
 const TEAM_IDS = ['red', 'blue', 'green', 'amber'] as const;
 
-/** Accept 2-4 team labels from the professor; fall back to the default pair. */
-function parseTeams(raw: unknown): DiscussionTeam[] {
-  if (!Array.isArray(raw)) return DEFAULT_TEAMS;
-  const labels = raw
-    .map((x) => String(x ?? '').trim().slice(0, 32))
-    .filter((x) => x !== '')
-    .slice(0, 4);
-  if (labels.length < 2) return DEFAULT_TEAMS;
+const MAX_TEAMS = 4;
+
+/**
+ * Accept 2-4 group labels from the professor. Omitting `teams` entirely means
+ * "use the default For/Against pair"; sending a bad list is an error rather
+ * than something to quietly coerce — silently dropping a fifth group would
+ * leave those students with nowhere to sit and no indication why.
+ */
+function parseTeams(raw: unknown): DiscussionTeam[] | { error: string } {
+  if (raw === undefined || raw === null) return DEFAULT_TEAMS;
+  if (!Array.isArray(raw)) return { error: 'Groups must be a list of names.' };
+  const labels = raw.map((x) => String(x ?? '').trim()).filter((x) => x !== '');
+  if (labels.length !== raw.length) return { error: 'Group names cannot be blank.' };
+  if (labels.length < 2 || labels.length > MAX_TEAMS) {
+    return { error: `A discussion needs between 2 and ${MAX_TEAMS} groups.` };
+  }
+  if (labels.some((l) => l.length > 32)) {
+    return { error: 'Group names are limited to 32 characters.' };
+  }
+  const lowered = labels.map((l) => l.toLowerCase());
+  if (new Set(lowered).size !== lowered.length) {
+    return { error: 'Group names must be different from one another.' };
+  }
   return labels.map((label, i) => ({
     id: TEAM_IDS[i] ?? `team${i}`,
     label,
@@ -35,18 +50,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   let courseId: string;
   let topic: string;
-  let teams: DiscussionTeam[];
+  let parsed: DiscussionTeam[] | { error: string };
   try {
     const body = (await req.json()) as Record<string, unknown>;
     courseId = String(body.courseId ?? '').trim();
     topic = String(body.topic ?? '').trim();
-    teams = parseTeams(body.teams);
+    parsed = parseTeams(body.teams);
   } catch {
     return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
   }
   if (courseId === '' || topic === '') {
-    return NextResponse.json({ error: 'A course and a debate motion are required.' }, { status: 400 });
+    return NextResponse.json(
+      { error: 'A course and a discussion question are required.' },
+      { status: 400 },
+    );
   }
+  if (!Array.isArray(parsed)) return NextResponse.json({ error: parsed.error }, { status: 400 });
+  const teams = parsed;
 
   const repo = debateRepo();
   // Retry on the (vanishingly unlikely) join-code collision.

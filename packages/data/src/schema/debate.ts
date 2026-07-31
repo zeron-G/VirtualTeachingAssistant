@@ -155,8 +155,10 @@ export const debateTurns = pgTable(
 );
 
 /**
- * An AI judge verdict. ADVISORY ONLY: rows land with `isFinal = false` and a
- * professor must confirm them. Nothing here writes a grade.
+ * An AI reading of the discussion so far: what each group argued, where they
+ * agree, where they genuinely differ, and what nobody has raised. It does NOT
+ * rank the groups or declare a winner, and nothing here writes a grade —
+ * the professor can run it as many times as they like as the talk develops.
  */
 export const debateJudgements = pgTable(
   "debate_judgements",

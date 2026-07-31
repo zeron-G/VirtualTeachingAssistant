@@ -56,7 +56,12 @@ export function NewDebateForm() {
     const res = await fetch('/api/debate/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ courseId, topic, teams }),
+      // Drop rows the professor added but left blank — the API rejects those.
+      body: JSON.stringify({
+        courseId,
+        topic,
+        teams: teams.map((t) => t.trim()).filter((t) => t !== ''),
+      }),
     });
     const data = (await res.json().catch(() => ({}))) as {
       session?: { id: string };
