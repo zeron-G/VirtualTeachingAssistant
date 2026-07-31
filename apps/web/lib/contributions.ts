@@ -64,6 +64,10 @@ const SYSTEM = [
   '- Band 1 means "little evidence IN THIS TRANSCRIPT", not "this is a weak student". Say so in',
   '  that wording when you use it.',
   '- Never speculate about a person beyond what the transcript shows.',
+  '- Make NO quantitative claims about participation — how many turns someone took, who spoke',
+  '  most, whether the floor was evenly shared by count. Those numbers are measured separately',
+  "  and you will get them wrong. Describe what was said, not how often.",
+  '- Refer to people ONLY by their S-code. Never invent a name.',
   '',
   'In roomNotes, comment on the SHAPE of the discussion (was the floor lopsided? did a point go',
   'unanswered? did anyone get talked over?) — about the room, not about individuals.',
@@ -147,6 +151,23 @@ export async function assessContributions(
     lines.join('\n'),
   ].join('\n');
 
+  /**
+   * Put the real names back. The model must not SEE names (bias), but an
+   * instructor reading "S5's point went unanswered" has no idea who that is —
+   * the codes are an implementation detail, not something to ship to the UI.
+   * Longest code first so S10 is not clobbered by the S1 pattern.
+   */
+  const nameOf = new Map<string, string>();
+  for (const [pid, code] of codeOf) {
+    const p = participants.find((x) => x.id === pid);
+    if (p !== undefined) nameOf.set(code, p.displayName);
+  }
+  // One pattern over the whole text rather than one per code: `S1` must not
+  // match inside `S10`, and a per-code loop would rewrite S1 first and corrupt
+  // it. `\d+` grabs the full number, so the lookup is exact.
+  const deanonymize = (text: string): string =>
+    text.replace(/\bS\d+\b/g, (code) => nameOf.get(code) ?? code);
+
   const raw = await chat(SYSTEM, user, { maxTokens: 3000, role: 'debate.contributions' });
   const parsed = extractJson(raw) as {
     speakers?: { id?: unknown; bands?: Record<string, unknown>; evidence?: unknown; suggestion?: unknown }[];
@@ -187,20 +208,23 @@ export async function assessContributions(
         shareOfTalk: totalWords === 0 ? 0 : words / totalWords,
       },
       bands,
-      evidence: String(got?.evidence ?? '').trim(),
-      suggestion: String(got?.suggestion ?? '').trim(),
+      evidence: deanonymize(String(got?.evidence ?? '').trim()),
+      suggestion: deanonymize(String(got?.suggestion ?? '').trim()),
     });
   }
 
   const roomNotes = Array.isArray(parsed.roomNotes)
-    ? parsed.roomNotes.map((x) => String(x ?? '').trim()).filter((x) => x !== '').slice(0, 5)
+    ? parsed.roomNotes
+        .map((x) => deanonymize(String(x ?? '').trim()))
+        .filter((x) => x !== '')
+        .slice(0, 5)
     : [];
 
   return {
     reviews,
     silent,
     roomNotes,
-    summary: String(parsed.summary ?? '').trim() || '(no summary returned)',
+    summary: deanonymize(String(parsed.summary ?? '').trim()) || '(no summary returned)',
     model: 'anthropic/claude-opus-4.8',
   };
 }
