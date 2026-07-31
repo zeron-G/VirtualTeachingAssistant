@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 
 import { Transcript } from '@/app/_components/Transcript';
+import { ContributionSheet } from './contribution-sheet';
 import { useDebateStream } from '@/lib/useDebateStream';
 import type { Snapshot } from '@/lib/useDebateStream';
 
@@ -46,6 +47,7 @@ export function Console({
   const [judging, setJudging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [projector, setProjector] = useState(false);
+  const [contributions, setContributions] = useState(false);
 
   // The QR is a ROTATING check-in ticket: it re-mints every 30s so a photo taken
   // earlier stops working. Students must scan it live to join.
@@ -409,8 +411,41 @@ export function Console({
               )}
             </div>
           </section>
+
+          {/* ---- Participation ---- */}
+          <section className="panel">
+            <div className="panel-head">
+              <h2>Contribution review</h2>
+              <span className="spacer" />
+              <span className="badge">You only</span>
+            </div>
+            <div className="panel-body">
+              <p className="t-small t-muted">
+                A per-student read of how each person took part — measured turns and share of the
+                talking, plus bands for substance, engagement and moving the discussion on.
+                Advisory, never a grade, and never shown to students.
+              </p>
+              <button
+                type="button"
+                className="btn block"
+                style={{ marginTop: 12 }}
+                disabled={turns.length === 0}
+                onClick={() => setContributions(true)}
+              >
+                {turns.length === 0 ? 'Nothing to review yet' : 'Open review'}
+              </button>
+            </div>
+          </section>
         </aside>
       </div>
+
+      {contributions && (
+        <ContributionSheet
+          sessionId={session.id}
+          groups={[...teams, OBSERVER]}
+          onClose={() => setContributions(false)}
+        />
+      )}
 
       {/* ---- Projector mode ---- */}
       {projector && (

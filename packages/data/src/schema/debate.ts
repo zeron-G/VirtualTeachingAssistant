@@ -155,11 +155,21 @@ export const debateTurns = pgTable(
   }),
 );
 
+/** What an AI reading is about. See {@link debateJudgements}. */
+export const JUDGEMENT_KINDS = ["discussion", "contributions"] as const;
+export type JudgementKind = (typeof JUDGEMENT_KINDS)[number];
+
 /**
- * An AI reading of the discussion so far: what each group argued, where they
- * agree, where they genuinely differ, and what nobody has raised. It does NOT
- * rank the groups or declare a winner, and nothing here writes a grade —
- * the professor can run it as many times as they like as the talk develops.
+ * An AI reading of the session. Two kinds, both advisory, neither a grade:
+ *
+ *  - `discussion` — what each GROUP argued, where they agree, where they
+ *    differ, what nobody raised. Never ranks the groups or picks a winner.
+ *  - `contributions` — a per-PARTICIPANT participation review for the
+ *    instructor's eyes only. Deliberately excluded from the session snapshot,
+ *    because that snapshot is served over an UNAUTHENTICATED SSE stream that
+ *    every student's phone is subscribed to.
+ *
+ * Append-only: the professor can re-run either as the discussion develops.
  */
 export const debateJudgements = pgTable(
   "debate_judgements",
@@ -168,7 +178,8 @@ export const debateJudgements = pgTable(
     sessionId: uuid("session_id")
       .notNull()
       .references(() => debateSessions.id, { onDelete: "cascade" }),
-    /** The structured insight (per-group points, agreements, gaps, next question). */
+    kind: text("kind").$type<JudgementKind>().notNull().default("discussion"),
+    /** The structured payload; its shape is owned by the prompt for this `kind`. */
     scores: jsonb("scores").notNull().default({}),
     /** Short prose summary the professor can read out. */
     rationale: text("rationale").notNull(),
@@ -180,7 +191,7 @@ export const debateJudgements = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    sessionIdx: index("debate_judgements_session_idx").on(t.sessionId),
+    sessionIdx: index("debate_judgements_session_idx").on(t.sessionId, t.kind, t.createdAt),
   }),
 );
 

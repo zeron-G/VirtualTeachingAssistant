@@ -8,6 +8,7 @@ import {
 } from "../schema/debate.js";
 import type {
   DebateJudgementRow,
+  JudgementKind,
   DebateParticipantRow,
   DebateSessionRow,
   DebateTurnRow,
@@ -17,7 +18,14 @@ import type {
   NewDebateTurnRow,
 } from "../schema/debate.js";
 
-/** A session plus everything a client needs to render it. */
+/**
+ * A session plus everything a client needs to render it.
+ *
+ * This is broadcast over an UNAUTHENTICATED SSE stream to every phone in the
+ * room, so it carries only what a student may see. The per-participant
+ * contribution review is fetched separately by the professor and is
+ * deliberately absent here.
+ */
 export interface DebateSnapshot {
   readonly session: DebateSessionRow;
   readonly participants: DebateParticipantRow[];
@@ -185,12 +193,15 @@ export class DebateRepository {
     return row;
   }
 
-  /** The newest verdict for a session, if any. */
-  async latestJudgement(sessionId: string): Promise<DebateJudgementRow | undefined> {
+  /** The newest AI reading of the given kind for a session, if any. */
+  async latestJudgement(
+    sessionId: string,
+    kind: JudgementKind = "discussion",
+  ): Promise<DebateJudgementRow | undefined> {
     const rows = await this.db
       .select()
       .from(debateJudgements)
-      .where(eq(debateJudgements.sessionId, sessionId))
+      .where(and(eq(debateJudgements.sessionId, sessionId), eq(debateJudgements.kind, kind)))
       .orderBy(sql`${debateJudgements.createdAt} desc`)
       .limit(1);
     return rows[0];

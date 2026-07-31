@@ -1586,6 +1586,132 @@ input.code {
   background: var(--group, var(--text-subtle));
 }
 
+/* ---- Contribution report (instructor-only sheet) ------------------------ */
+
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.sheet-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 22px 20px 60px;
+}
+
+.sheet-inner {
+  max-width: 880px;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.reviewee {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 20px;
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+
+@media (max-width: 720px) {
+  .reviewee {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+}
+
+.reviewee-stats {
+  display: flex;
+  gap: 14px;
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A four-segment meter. Bands are ordinal, so segments beat a number: there is
+   no arithmetic to invite, and nothing to average into a grade. */
+.bandrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+}
+
+.bandrow + .bandrow {
+  border-top: 1px solid var(--border);
+}
+
+.bandrow-label {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.meter {
+  display: flex;
+  gap: 3px;
+}
+
+.meter i {
+  width: 16px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--surface-3);
+}
+
+.meter i[data-on='true'] {
+  background: var(--accent);
+}
+
+.meter[data-band='1'] i[data-on='true'] {
+  background: var(--text-subtle);
+}
+
+.evidence {
+  margin-top: 10px;
+  padding: 10px 13px;
+  border-left: 2px solid var(--border-strong);
+  background: var(--surface-2);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.evidence + .evidence {
+  margin-top: 7px;
+}
+
+.evidence b {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+  margin-bottom: 3px;
+}
+
 /* ---- Misc --------------------------------------------------------------- */
 
 .divider {
