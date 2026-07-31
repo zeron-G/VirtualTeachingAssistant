@@ -184,9 +184,9 @@ function LiveRoom({ sessionId, participantId }: { sessionId: string; participant
   const snapshot = useDebateStream(sessionId, { ...EMPTY, session: { ...EMPTY.session, id: sessionId } });
   const { session, turns } = snapshot;
   const me = snapshot.participants.find((p) => p.id === participantId);
-  // You may record when the professor gave you the floor, OR when the whole
-  // room is open (free-discussion phases).
-  const hasFloor = session.floorParticipantId === participantId || session.openFloor === true;
+  // You may record when the whole room is open (the DEFAULT), or when the
+  // professor gave you the floor in strict turn-taking mode.
+  const hasFloor = session.openFloor !== false || session.floorParticipantId === participantId;
   const handRaised = me?.handRaisedAt != null;
 
   async function toggleHand(raised: boolean): Promise<void> {
@@ -213,8 +213,9 @@ function LiveRoom({ sessionId, participantId }: { sessionId: string; participant
   const genRef = useRef(0);
   const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /** Hard ceiling so a stuck button can never record indefinitely. */
-  const MAX_TURN_MS = 3 * 60 * 1000;
+  /** Hard ceiling so a forgotten open mic can never record indefinitely. */
+  const MAX_TURN_MS = 5 * 60 * 1000;
+  const [elapsed, setElapsed] = useState(0);
 
   const hardStop = useCallback((): void => {
     wantRef.current = false;
@@ -233,6 +234,13 @@ function LiveRoom({ sessionId, participantId }: { sessionId: string; participant
   useEffect(() => {
     if (!hasFloor) hardStop();
   }, [hasFloor, hardStop]);
+
+  // Live elapsed counter — an open mic must never be ambiguous.
+  useEffect(() => {
+    if (!recording) return;
+    const t = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [recording]);
 
   // Never leave a live microphone behind on unmount.
   useEffect(() => {
@@ -280,8 +288,9 @@ function LiveRoom({ sessionId, participantId }: { sessionId: string; participant
       recorderRef.current = rec;
       rec.start();
       setRecording(true);
+      setElapsed(0);
       maxTimerRef.current = setTimeout(() => {
-        setNote('Turn ended automatically after 3 minutes.');
+        setNote('Microphone closed automatically after 5 minutes.');
         hardStop();
       }, MAX_TURN_MS);
     } catch {
@@ -373,34 +382,46 @@ function LiveRoom({ sessionId, participantId }: { sessionId: string; participant
       >
         {note !== null && <p className="error" style={{ marginTop: 0 }}>{note}</p>}
         {hasFloor ? (
-          <button
-            type="button"
-            onPointerDown={(e) => {
-              // Keep receiving pointerup even if the finger slides off the button.
-              e.currentTarget.setPointerCapture?.(e.pointerId);
-              void startRecording();
-            }}
-            onPointerUp={stopRecording}
-            // iOS fires pointercancel on scroll / call / notification — without
-            // this the mic would stay open.
-            onPointerCancel={stopRecording}
-            onLostPointerCapture={stopRecording}
-            disabled={uploading}
-            style={{
-              width: '100%',
-              padding: '22px 16px',
-              borderRadius: 14,
-              border: 0,
-              fontSize: 18,
-              fontWeight: 800,
-              color: '#fff',
-              background: recording ? '#c0392b' : '#1a7f37',
-              cursor: 'pointer',
-              touchAction: 'none',
-            }}
-          >
-            {uploading ? 'Sending…' : recording ? '● Recording — release to send' : '🎤 Hold to speak'}
-          </button>
+          <>
+            <button
+              type="button"
+              // Tap to open the mic, tap again to close and send. A 3-minute
+              // speech is not something anyone can hold a button through.
+              onClick={() => (recording ? stopRecording() : void startRecording())}
+              disabled={uploading}
+              style={{
+                width: '100%',
+                padding: '22px 16px',
+                borderRadius: 14,
+                border: 0,
+                fontSize: 18,
+                fontWeight: 800,
+                color: '#fff',
+                background: recording ? '#c0392b' : '#1a7f37',
+                cursor: 'pointer',
+                touchAction: 'manipulation',
+              }}
+            >
+              {uploading
+                ? 'Sending…'
+                : recording
+                  ? `⏹ Stop & send · ${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`
+                  : '🎤 Turn on microphone'}
+            </button>
+            {recording && (
+              <div
+                style={{
+                  textAlign: 'center',
+                  marginTop: 8,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: '#c0392b',
+                }}
+              >
+                ● YOUR MICROPHONE IS ON — everyone nearby is being recorded on your device
+              </div>
+            )}
+          </>
         ) : (
           <>
             <button

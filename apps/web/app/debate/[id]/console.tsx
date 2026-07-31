@@ -278,7 +278,7 @@ export function Console({
               <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, fontWeight: 400 }}>
                 <input
                   type="checkbox"
-                  checked={session.openFloor === true}
+                  checked={session.openFloor !== false}
                   disabled={busy}
                   onChange={(e) => void patch({ openFloor: e.target.checked })}
                 />
@@ -295,9 +295,9 @@ export function Console({
             </div>
           </div>
           <p className="sub" style={{ marginTop: 6 }}>
-            {session.openFloor === true
-              ? 'OPEN FLOOR: every participant can record right now.'
-              : 'Only the person holding the floor can record. ✋ marks a student asking to speak.'}
+            {session.openFloor !== false
+              ? 'OPEN FLOOR (default): anyone can switch their own mic on and off. Untick it to run a strict turn-taking debate.'
+              : 'Turn-taking: only the person you give the floor to can record. ✋ marks a student asking to speak.'}
           </p>
           {(
             [

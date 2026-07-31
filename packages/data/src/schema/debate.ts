@@ -65,10 +65,11 @@ export const debateSessions = pgTable(
      */
     requireTicket: boolean("require_ticket").notNull().default(true),
     /**
-     * When true, any consented participant may record without being granted the
-     * floor — for free-discussion phases (and for testing with one device).
+     * DEFAULT ON: any consented participant may open their own microphone
+     * whenever they want. The professor can switch it off to run a strict
+     * turn-taking debate, in which case only `floorParticipantId` may record.
      */
-    openFloor: boolean("open_floor").notNull().default(false),
+    openFloor: boolean("open_floor").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
   },
