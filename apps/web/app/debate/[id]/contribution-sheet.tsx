@@ -17,16 +17,13 @@ interface Group {
 function Meter({ value }: { value: number | undefined }) {
   if (value === undefined) return <span className="t-small t-subtle">—</span>;
   return (
-    <span
-      className="meter"
-      data-band={value}
-      role="img"
-      aria-label={`${value} of 4 — ${BANDS[value] ?? ''}`}
-      title={BANDS[value]}
-    >
-      {[1, 2, 3, 4].map((i) => (
-        <i key={i} data-on={i <= value} />
-      ))}
+    <span className="band">
+      <span className="band-word">{BANDS[value]}</span>
+      <span className="meter" data-band={value} role="img" aria-label={`${value} of 4`}>
+        {[1, 2, 3, 4].map((i) => (
+          <i key={i} data-on={i <= value} />
+        ))}
+      </span>
     </span>
   );
 }
@@ -199,7 +196,7 @@ export function ContributionSheet({
                       </span>
                     </div>
                     <div className="reviewee-stats">
-                      <span>{r.stats.turns} turns</span>
+                      <span>{r.stats.turns === 1 ? '1 turn' : `${r.stats.turns} turns`}</span>
                       <span>{r.stats.words} words</span>
                       <span>{Math.round(r.stats.shareOfTalk * 100)}% of the talking</span>
                     </div>

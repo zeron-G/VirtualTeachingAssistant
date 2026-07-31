@@ -1668,6 +1668,19 @@ input.code {
   color: var(--text-muted);
 }
 
+.band {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.band-word {
+  font-size: 12px;
+  font-weight: 620;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .meter {
   display: flex;
   gap: 3px;
