@@ -1,10 +1,22 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
+
+import { Transcript } from '@/app/_components/Transcript';
 import { useDebateStream } from '@/lib/useDebateStream';
 import type { Snapshot } from '@/lib/useDebateStream';
 
-const OBSERVER = { id: 'observer', label: 'Unaligned', color: '#5b6672' };
+const OBSERVER = { id: 'observer', label: 'Observers', color: '#5b6672' };
+const ROTATE_SECONDS = 30;
+
+interface Insight {
+  teams?: { teamId: string; label: string; points: string[]; suggestion: string }[];
+  agreements?: string[];
+  disagreements?: string[];
+  gaps?: string[];
+  nextQuestion?: string;
+}
 
 export function Console({
   initial,
@@ -33,12 +45,12 @@ export function Console({
   const [busy, setBusy] = useState(false);
   const [judging, setJudging] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showQr, setShowQr] = useState(true);
+  const [projector, setProjector] = useState(false);
 
   // The QR is a ROTATING check-in ticket: it re-mints every 30s so a photo taken
   // earlier stops working. Students must scan it live to join.
   const [qr, setQr] = useState(qrDataUrl);
-  const [rotatesIn, setRotatesIn] = useState(30);
+  const [rotatesIn, setRotatesIn] = useState(ROTATE_SECONDS);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -51,7 +63,7 @@ export function Console({
           const d = (await res.json()) as { qrDataUrl?: string; rotateInSeconds?: number };
           if (!stopped && d.qrDataUrl !== undefined) {
             setQr(d.qrDataUrl);
-            setRotatesIn(d.rotateInSeconds ?? 30);
+            setRotatesIn(d.rotateInSeconds ?? ROTATE_SECONDS);
           }
         }
       } catch {
@@ -68,9 +80,19 @@ export function Console({
 
   // Visible countdown so the room can see the code is live.
   useEffect(() => {
-    const t = setInterval(() => setRotatesIn((s) => (s <= 1 ? 30 : s - 1)), 1000);
+    const t = setInterval(() => setRotatesIn((s) => (s <= 1 ? ROTATE_SECONDS : s - 1)), 1000);
     return () => clearInterval(t);
   }, []);
+
+  // Esc leaves projector mode — the professor is at a lectern, not a mouse.
+  useEffect(() => {
+    if (!projector) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setProjector(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [projector]);
 
   const patch = useCallback(
     async (body: Record<string, unknown>) => {
@@ -104,10 +126,10 @@ export function Console({
       const res = await fetch(`/api/debate/sessions/${session.id}/judge`, { method: 'POST' });
       if (!res.ok) {
         const d = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(d.error ?? 'The judge could not run.');
+        setError(d.error ?? 'The assistant could not read the discussion.');
       }
     } catch {
-      setError('Network problem running the judge.');
+      setError('Network problem running the assistant.');
     } finally {
       setJudging(false);
     }
@@ -115,266 +137,306 @@ export function Console({
 
   const teams = session.teams ?? [];
   const teamIds = new Set(teams.map((t) => t.id));
-  /** Every configured group, plus an Unaligned bucket when anyone is in it. */
+  /** Every configured group, plus an Observers bucket when anyone is in it. */
   const groups = [
     ...teams.map((t) => ({ ...t, members: participants.filter((p) => p.team === t.id) })),
-    {
-      ...OBSERVER,
-      members: participants.filter((p) => !teamIds.has(p.team)),
-    },
-  ].filter((g) => g.id !== 'observer' || g.members.length > 0);
-  const colorOf = (id: string): string =>
-    teams.find((t) => t.id === id)?.color ?? OBSERVER.color;
-  const insight = judgement?.scores as
-    | {
-        teams?: { teamId: string; label: string; points: string[]; suggestion: string }[];
-        agreements?: string[];
-        disagreements?: string[];
-        gaps?: string[];
-        nextQuestion?: string;
-      }
-    | undefined;
+    { ...OBSERVER, members: participants.filter((p) => !teamIds.has(p.team)) },
+  ].filter((g) => g.id !== OBSERVER.id || g.members.length > 0);
+  const colorOf = (id: string): string => teams.find((t) => t.id === id)?.color ?? OBSERVER.color;
+  const insight = judgement?.scores as Insight | undefined;
+  const ended = session.status === 'ended';
+  const openFloor = session.openFloor !== false;
+  const requireTicket = session.requireTicket !== false;
+  const raisedCount = participants.filter((p) => p.handRaisedAt != null).length;
 
   return (
-    <>
-      <header className="topbar">
-        <div className="brand">
+    <div className="console">
+      <header className="console-head">
+        <a className="brand" href="/debate" title="All discussions">
           <div className="brand-mark">VTA</div>
-          <div className="brand-name">Discussion console</div>
-        </div>
-        <div className="identity">
-          <span>{professorEmail}</span>
-          <span className="badge">{session.status}</span>
-          <a className="link" href="/debate">
-            ← All discussions
-          </a>
-        </div>
-      </header>
-
-      <main className="container" style={{ maxWidth: 1100 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start' }}>
-          <div>
-            <h1 style={{ marginBottom: 4 }}>{session.topic}</h1>
-            <p className="sub">
-              {participants.length} joined · {turns.length} contributions
-            </p>
+        </a>
+        <div className="console-topic" style={{ flex: 1 }}>
+          <h1 title={session.topic}>{session.topic}</h1>
+          <div className="console-stats">
+            <span>
+              {participants.length} joined
+            </span>
+            <span>{turns.length} contributions</span>
+            {raisedCount > 0 && <span style={{ color: 'var(--warn)' }}>{raisedCount} raised</span>}
           </div>
-          {session.status !== 'ended' && (
+        </div>
+
+        {ended ? (
+          <span className="badge">Ended</span>
+        ) : (
+          <>
+            <span className="badge ok">
+              <i className="dot pulse" />
+              Live
+            </span>
             <button
               type="button"
-              className="link"
+              className="btn danger sm"
               disabled={busy}
               onClick={() => {
-                if (window.confirm('End this discussion? Students will no longer be able to speak.')) {
+                if (
+                  window.confirm('End this discussion? Students will no longer be able to speak.')
+                ) {
                   void patch({ endNow: true });
                 }
               }}
-              style={{ whiteSpace: 'nowrap' }}
             >
-              End discussion
+              End
             </button>
-          )}
-        </div>
-        {error !== null && <p className="error">{error}</p>}
+          </>
+        )}
+        <span className="appbar-email t-small t-subtle">{professorEmail}</span>
+      </header>
 
-        {/* ---- Join panel ---- */}
-        <section className="card" style={{ marginTop: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0 }}>Join</h3>
-            <button className="link" type="button" onClick={() => setShowQr((v) => !v)}>
-              {showQr ? 'Hide' : 'Show'} QR
-            </button>
-          </div>
-          {showQr && (
-            <div style={{ display: 'flex', gap: 24, alignItems: 'center', marginTop: 12, flexWrap: 'wrap' }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={qr} alt="Join QR code" width={220} height={220} />
-              <div>
-                {session.requireTicket !== false ? (
-                  <>
-                    <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-                      Live check-in — refreshes in {rotatesIn}s
-                    </div>
-                    <div style={{ fontSize: 15, marginTop: 6, maxWidth: 320 }}>
-                      Students must <strong>scan this code</strong> to join. A screenshot or the
-                      typed code alone won&apos;t work.
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ fontSize: 13, color: 'var(--muted)' }}>Code</div>
-                    <div style={{ fontSize: 44, fontWeight: 800, letterSpacing: 6 }}>
-                      {session.joinCode}
-                    </div>
-                    <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
-                      Open joining — anyone with the code can join.
-                    </div>
-                  </>
-                )}
-                <label
-                  style={{
-                    display: 'flex',
-                    gap: 8,
-                    alignItems: 'center',
-                    marginTop: 14,
-                    fontSize: 13,
-                    fontWeight: 400,
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={session.requireTicket !== false}
-                    disabled={busy}
-                    onChange={(e) => void patch({ requireTicket: e.target.checked })}
-                  />
-                  Require live QR scan (check-in)
-                </label>
-              </div>
+      <div className="console-body">
+        <main className="console-main">
+          {error !== null && (
+            <div style={{ padding: '12px 18px 0' }}>
+              <p className="banner error" role="alert">
+                {error}
+              </p>
             </div>
           )}
-        </section>
+          <Transcript
+            turns={turns}
+            groups={teams}
+            emptyTitle="No one has spoken yet"
+            emptyBody="Turns appear here the moment a student stops recording. Put the QR on screen to let people in."
+          />
+        </main>
 
-        {/* ---- Floor control ---- */}
-        <section className="card" style={{ marginTop: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0 }}>Who has the microphone</h3>
-            <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-              <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, fontWeight: 400 }}>
+        <aside className="console-side">
+          {/* ---- Check-in ---- */}
+          <section className="panel">
+            <div className="panel-head">
+              <h2>Check-in</h2>
+              <span className="spacer" />
+              <button type="button" className="btn-link" onClick={() => setProjector(true)}>
+                Full screen
+              </button>
+            </div>
+            <div className="panel-body" style={{ padding: 12 }}>
+              <div className="qr-tile">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img className="qr-img" src={qr} alt="QR code to join this discussion" />
+                {requireTicket ? (
+                  <div className="qr-rotate">
+                    <span className="qr-bar">
+                      <i style={{ width: `${(rotatesIn / ROTATE_SECONDS) * 100}%` }} />
+                    </span>
+                    <span>refreshes in {rotatesIn}s</span>
+                  </div>
+                ) : (
+                  <div className="joincode">{session.joinCode}</div>
+                )}
+              </div>
+
+              <p className="t-small t-muted" style={{ marginTop: 10 }}>
+                {requireTicket
+                  ? 'Students must scan this live. A screenshot or the typed code alone will not work.'
+                  : 'Open joining — anyone with the code can get in, from anywhere.'}
+              </p>
+
+              <label className="check" style={{ marginTop: 12 }}>
                 <input
                   type="checkbox"
-                  checked={session.openFloor !== false}
-                  disabled={busy}
-                  onChange={(e) => void patch({ openFloor: e.target.checked })}
+                  checked={requireTicket}
+                  disabled={busy || ended}
+                  onChange={(e) => void patch({ requireTicket: e.target.checked })}
                 />
-                Open floor (everyone)
+                <span>Require a live scan to join</span>
               </label>
+            </div>
+          </section>
+
+          {/* ---- Microphone ---- */}
+          <section className="panel">
+            <div className="panel-head">
+              <h2>Microphone</h2>
+              <span className="spacer" />
               <button
                 type="button"
-                className="link"
+                className="btn-link"
                 disabled={busy || session.floorParticipantId === null}
                 onClick={() => void patch({ floorParticipantId: null })}
               >
-                Close the floor
+                Close floor
               </button>
             </div>
-          </div>
-          <p className="sub" style={{ marginTop: 6 }}>
-            {session.openFloor !== false
-              ? 'OPEN FLOOR (default): anyone can switch their own mic on and off. Untick it to take turns instead.'
-              : 'Turn-taking: only the person you give the floor to can record. ✋ marks a student asking to speak.'}
-          </p>
-          {groups.map((g) => (
-            <div key={g.id} style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: g.color }}>
-                {g.label} · {g.members.length}
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
-                {g.members.length === 0 && <span className="sub">nobody yet</span>}
-                {g.members.map((p) => {
-                  const holds = session.floorParticipantId === p.id;
-                  const raised = p.handRaisedAt != null;
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void patch({ floorParticipantId: holds ? null : p.id })}
-                      style={{
-                        padding: '7px 12px',
-                        borderRadius: 999,
-                        border: `1px solid ${holds ? '#1a7f37' : raised ? '#b8860b' : 'var(--border)'}`,
-                        background: holds ? '#1a7f37' : raised ? '#fff7e0' : 'var(--bg)',
-                        color: holds ? '#fff' : 'var(--text)',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                      }}
-                    >
-                      {holds ? '🎤 ' : raised ? '✋ ' : ''}
-                      {p.displayName}
-                    </button>
-                  );
-                })}
+            <div className="panel-body">
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={openFloor}
+                  disabled={busy || ended}
+                  onChange={(e) => void patch({ openFloor: e.target.checked })}
+                />
+                <span>
+                  <strong>Open floor</strong> — anyone can switch their own mic on and off.
+                  {!openFloor && ' Untick means only the person you pick can record.'}
+                </span>
+              </label>
+
+              <div className="stack" style={{ marginTop: 16, gap: 14 }}>
+                {groups.map((g) => (
+                  <div key={g.id} style={{ '--group': g.color } as CSSProperties}>
+                    <div className="row" style={{ gap: 7, marginBottom: 7 }}>
+                      <i className="group-dot" />
+                      <span className="group-name t-small">{g.label}</span>
+                      <span className="t-small t-subtle">{g.members.length}</span>
+                    </div>
+                    {g.members.length === 0 ? (
+                      <span className="t-small t-subtle">nobody yet</span>
+                    ) : (
+                      <div className="row wrap" style={{ gap: 6 }}>
+                        {g.members.map((p) => {
+                          const holds = session.floorParticipantId === p.id;
+                          const raised = p.handRaisedAt != null;
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              className="pill"
+                              data-state={holds ? 'holding' : raised ? 'raised' : undefined}
+                              disabled={busy || ended}
+                              title={
+                                holds ? 'Has the floor — click to take it back' : 'Give the floor'
+                              }
+                              onClick={() =>
+                                void patch({ floorParticipantId: holds ? null : p.id })
+                              }
+                            >
+                              {holds ? '🎤' : raised ? '✋' : null}
+                              {p.displayName}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {participants.length === 0 && (
+                  <p className="t-small t-subtle">
+                    Nobody has joined yet — show the QR on the projector.
+                  </p>
+                )}
               </div>
             </div>
-          ))}
-        </section>
+          </section>
 
-        {/* ---- Transcript ---- */}
-        <section className="card" style={{ marginTop: 16 }}>
-          <h3>Live transcript</h3>
-          {turns.length === 0 && <p className="sub">Nothing spoken yet.</p>}
-          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {turns.map((t) => (
-              <div key={t.id}>
-                <span style={{ fontWeight: 700, color: colorOf(t.team) }}>{t.speakerName}</span>
-                <div>{t.text}</div>
-              </div>
-            ))}
-          </div>
-        </section>
+          {/* ---- AI ---- */}
+          <section className="panel">
+            <div className="panel-head">
+              <h2>AI assistant</h2>
+              <span className="spacer" />
+              <button
+                type="button"
+                className="btn-link"
+                disabled={judging || turns.length === 0}
+                onClick={() => void runJudge()}
+              >
+                {judgement === undefined ? 'Read the room' : 'Refresh'}
+              </button>
+            </div>
+            <div className="panel-body">
+              {judging ? (
+                <div className="thinking">
+                  <i />
+                  <i />
+                  <i />
+                  <span>Reading {turns.length} contributions…</span>
+                </div>
+              ) : judgement === undefined ? (
+                <p className="t-small t-muted">
+                  Summarises what each group argued, finds real agreement and disagreement, and
+                  points at what nobody said. It never scores anyone or picks a winner, and it
+                  never sees student names.
+                </p>
+              ) : (
+                <div className="stack">
+                  <p className="insight-summary">{judgement.rationale}</p>
 
-        {/* ---- AI assistant ---- */}
-        <section className="card" style={{ marginTop: 16, marginBottom: 40 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0 }}>AI assistant</h3>
-            <button className="link" type="button" disabled={judging} onClick={() => void runJudge()}>
-              {judging ? 'Reading the discussion…' : 'Summarise the discussion'}
-            </button>
-          </div>
-          <p className="sub" style={{ marginTop: 6 }}>
-            Summarises each group, finds agreement and disagreement, and points at what nobody
-            said. It does not score anyone or pick a winner. Names are hidden from it.
-          </p>
+                  {(insight?.teams ?? []).map((t) => (
+                    <div
+                      className="insight-block"
+                      key={t.teamId}
+                      style={{ '--group': colorOf(t.teamId) } as CSSProperties}
+                    >
+                      <div className="row" style={{ gap: 7, marginBottom: 7 }}>
+                        <i className="group-dot" />
+                        <span className="group-name t-small">{t.label}</span>
+                      </div>
+                      <ul className="insight-list">
+                        {t.points.map((pt, i) => (
+                          <li key={i}>{pt}</li>
+                        ))}
+                      </ul>
+                      {t.suggestion !== '' && <p className="insight-suggestion">{t.suggestion}</p>}
+                    </div>
+                  ))}
 
-          {judgement !== undefined && (
-            <div style={{ marginTop: 14 }}>
-              <p style={{ fontSize: 15 }}>{judgement.rationale}</p>
+                  {(
+                    [
+                      ['Common ground', insight?.agreements ?? []],
+                      ['Where they differ', insight?.disagreements ?? []],
+                      ['Nobody mentioned', insight?.gaps ?? []],
+                    ] as const
+                  ).map(([label, items]) =>
+                    items.length === 0 ? null : (
+                      <div className="insight-block" key={label}>
+                        <h4>{label}</h4>
+                        <ul className="insight-list">
+                          {items.map((x, i) => (
+                            <li key={i}>{x}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ),
+                  )}
 
-              {(insight?.teams ?? []).map((t) => (
-                <div key={t.teamId} style={{ marginTop: 14 }}>
-                  <div style={{ fontWeight: 700, color: colorOf(t.teamId) }}>{t.label}</div>
-                  <ul style={{ margin: '6px 0 0', paddingLeft: 20 }}>
-                    {t.points.map((pt, i) => (
-                      <li key={i}>{pt}</li>
-                    ))}
-                  </ul>
-                  {t.suggestion !== '' && (
-                    <p className="sub" style={{ marginTop: 4 }}>
-                      → {t.suggestion}
-                    </p>
+                  {insight?.nextQuestion !== undefined && insight.nextQuestion !== '' && (
+                    <div className="insight-block">
+                      <h4>Ask the room next</h4>
+                      <p className="insight-question">{insight.nextQuestion}</p>
+                    </div>
                   )}
                 </div>
-              ))}
-
-              {(
-                [
-                  ['Common ground', insight?.agreements ?? []],
-                  ['Where they disagree', insight?.disagreements ?? []],
-                  ['Nobody mentioned', insight?.gaps ?? []],
-                ] as const
-              ).map(([label, items]) =>
-                items.length === 0 ? null : (
-                  <div key={label} style={{ marginTop: 14 }}>
-                    <div style={{ fontWeight: 700 }}>{label}</div>
-                    <ul style={{ margin: '6px 0 0', paddingLeft: 20 }}>
-                      {items.map((x, i) => (
-                        <li key={i}>{x}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ),
-              )}
-
-              {insight?.nextQuestion !== undefined && insight.nextQuestion !== '' && (
-                <div style={{ marginTop: 14 }}>
-                  <div style={{ fontWeight: 700 }}>Ask the room next</div>
-                  <p style={{ marginTop: 4 }}>{insight.nextQuestion}</p>
-                </div>
               )}
             </div>
+          </section>
+        </aside>
+      </div>
+
+      {/* ---- Projector mode ---- */}
+      {projector && (
+        <div className="projector" role="dialog" aria-modal="true" aria-label="Join code">
+          <button
+            type="button"
+            className="btn projector-close"
+            onClick={() => setProjector(false)}
+          >
+            Close (Esc)
+          </button>
+          <p className="projector-topic t-balance">{session.topic}</p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="projector-qr" src={qr} alt="QR code to join this discussion" />
+          {requireTicket ? (
+            <p className="projector-hint">
+              Scan to join · refreshes in {rotatesIn}s
+            </p>
+          ) : (
+            <p className="projector-hint">
+              Scan, or go to <strong>{new URL(joinUrl).host}</strong> and enter{' '}
+              <strong>{session.joinCode}</strong>
+            </p>
           )}
-        </section>
-      </main>
-    </>
+        </div>
+      )}
+    </div>
   );
 }

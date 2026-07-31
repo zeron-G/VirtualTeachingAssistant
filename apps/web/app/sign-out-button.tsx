@@ -6,7 +6,7 @@ export function SignOutButton() {
     window.location.assign('/login');
   }
   return (
-    <button type="button" className="link" onClick={signOut}>
+    <button type="button" className="btn ghost sm" onClick={signOut}>
       Sign out
     </button>
   );

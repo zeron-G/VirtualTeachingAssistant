@@ -12,28 +12,28 @@ export default async function DebateIndexPage() {
   if (session === null) redirect('/login');
 
   return (
-    <>
-      <header className="topbar">
-        <div className="brand">
+    <div className="shell">
+      <header className="appbar">
+        <a className="brand" href="/">
           <div className="brand-mark">VTA</div>
           <div className="brand-name">Virtual Teaching Assistant</div>
-        </div>
-        <div className="identity">
-          <span>{session.email}</span>
-          <span className="badge">professor</span>
-          <a className="link" href="/">
-            ← Dashboard
+        </a>
+        <div className="appbar-meta">
+          <span className="appbar-email">{session.email}</span>
+          <a className="btn ghost sm" href="/">
+            Dashboard
           </a>
         </div>
       </header>
 
       <main className="container">
-        <h1>Classroom discussion</h1>
-        <p className="sub">
-          Set a question, let each group put their view, and have the AI summarise the room. Students join by scanning a QR code — no account needed.
+        <h1 className="t-display t-balance">Classroom discussion</h1>
+        <p className="t-body t-muted" style={{ marginTop: 8, maxWidth: '58ch' }}>
+          Set a question, name the groups, and put the QR on screen. Every spoken turn is
+          transcribed and attributed, and the AI summarises the room on demand.
         </p>
         <NewDebateForm />
       </main>
-    </>
+    </div>
   );
 }

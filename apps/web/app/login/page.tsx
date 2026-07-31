@@ -35,42 +35,57 @@ export default function LoginPage() {
           <div className="brand-name">Virtual Teaching Assistant</div>
         </div>
 
-        <form onSubmit={submit}>
-          <h1>Instructor sign-in</h1>
-          <p className="sub">For course staff. Students don&apos;t need to sign in.</p>
+        <h1 className="t-title">Instructor sign-in</h1>
+        <p className="t-small t-muted" style={{ marginTop: 4 }}>
+          For course staff. Students never need an account.
+        </p>
 
-          <label htmlFor="email">Email</label>
-          <input
-            id="email"
-            type="email"
-            autoComplete="email"
-            placeholder="name@jhu.edu"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoFocus
-          />
+        <form onSubmit={submit} className="stack" style={{ marginTop: 22 }}>
+          <div className="field">
+            <label htmlFor="email">Email</label>
+            <input
+              id="email"
+              type="email"
+              autoComplete="email"
+              placeholder="name@jhu.edu"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              autoFocus
+            />
+          </div>
 
-          <div style={{ height: 14 }} />
+          <div className="field">
+            <label htmlFor="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              autoComplete="current-password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </div>
 
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            placeholder="••••••••"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
+          {error !== null && (
+            <p className="banner error" role="alert">
+              {error}
+            </p>
+          )}
 
-          <button className="primary" type="submit" disabled={busy || email === '' || password === ''}>
+          <button
+            className="btn primary lg block"
+            type="submit"
+            disabled={busy || email === '' || password === ''}
+          >
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
-          {error !== null && <p className="error">{error}</p>}
         </form>
 
-        <a className="hint" href="/" style={{ display: 'inline-block' }}>
+        <hr className="divider" style={{ margin: '22px 0 16px' }} />
+
+        <a className="t-small" href="/">
           ← Continue as a student
         </a>
       </div>
