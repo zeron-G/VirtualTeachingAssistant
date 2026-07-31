@@ -114,7 +114,7 @@ not an authentication claim.
 | `debate_sessions` | one classroom activity | `topic`, `teams jsonb` (2–4 `{id,label,color}`), `status`, `join_code` (unique), `require_ticket`, `open_floor`, `floor_participant_id`, `phase` |
 | `debate_participants` | the roster for one session | `display_name`, `team`, `device_id`, `consent_at`, `hand_raised_at`, `UNIQUE(session_id, device_id)` |
 | `debate_turns` | finalized transcript segments | `participant_id`, `speaker_name` (denormalized), `team`, `text`, `duration_sec` |
-| `debate_judgements` | one AI reading of the discussion | `scores jsonb` (the structured insight), `rationale` (prose summary), `model` |
+| `debate_judgements` | AI readings, append-only | `kind` (`discussion` \| `contributions`), `scores jsonb` (structured payload, shape owned by that kind's prompt), `rationale` (prose summary), `model` |
 
 Rules that matter:
 - **Groups are data, not code.** `teams` is a jsonb list on the session; the
@@ -253,6 +253,33 @@ The **AI debater** (a participant arguing its own side) is still unbuilt and is
 no longer obviously wanted: in a discussion it competes with students for the
 floor. Deferred pending the pilot.
 
+### 9a. Contribution review — instructor only
+
+A second reading, `lib/contributions.ts` → `assessContributions()`, for marking
+participation. Per person: measured stats (turns, words, share of talk, counted
+in code and never asked of the model) plus three ordinal bands 1-4 — substance,
+engagement with others, moves it forward — with one piece of evidence and one
+suggestion each. Plus whole-room notes and a list of people who joined but never
+spoke, which is the single most actionable output and also where a broken
+microphone hides.
+
+Four constraints, each enforced somewhere other than the prompt:
+
+| Constraint | How it is enforced |
+|---|---|
+| Students never see it | Not in `DebateSnapshot`. The SSE stream that carries the snapshot **has no authentication** — it is how every student's phone follows the transcript — so anything in it is public to the room. The review is fetched only by `POST/GET /api/debate/sessions/:id/contributions` behind the professor cookie, and the route deliberately does not call `publish()`. |
+| Not a grade | No overall or averaged figure exists in the type. Three ordinal bands, rendered as segments, with anchor words. A single number is what gets pasted into a gradebook unexamined. |
+| Not a ranking | The prompt forbids ordering or naming a best contributor; the UI renders roster order and offers no sort. |
+| Names stay out of the model | The transcript goes in as `S1`, `S2`, …; names are restored locally on the way out, so the instructor reads "Tom's concern went unanswered" while the model never saw "Tom". |
+
+**What it actually measures, stated in the UI.** Speech that a phone microphone
+captured and Whisper transcribed. That under-counts quiet speakers, poor
+microphones, non-native speakers, and anyone who contributed by listening and
+prompting others. Band 1 is anchored as "little evidence *in this transcript*",
+the model is barred from judging delivery, fluency, accent or grammar, and it is
+barred from any quantitative claim about participation (it invented turn counts
+on the first real run — those are measured in code).
+
 ---
 
 ## 10. Compliance checklist
@@ -303,7 +330,8 @@ transcript, since the same sentence would be captured 30 times at 30 SNRs.
 
 Built and deployed: schema + `DebateRepository`, professor console, rotating-QR
 join with consent, SSE state, press-to-speak capture, whisper-1 transcription,
-attributed live transcript, configurable 2–4 groups, AI synthesis.
+attributed live transcript, configurable 2–4 groups, AI synthesis, instructor-only
+contribution review (§9a).
 
 Not built, in rough priority order:
 1. Per-course token budget (see §10) — the only item with a blast radius outside
