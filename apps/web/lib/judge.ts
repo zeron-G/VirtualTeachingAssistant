@@ -1,173 +1,161 @@
 /**
- * The AI judge.
+ * The AI discussion assistant.
  *
- * ADVISORY ONLY — the verdict is stored with `isFinal = false` and a professor
- * must confirm it. Nothing here writes a grade.
+ * This activity is a CLASSROOM DISCUSSION, not a competitive debate: two to four
+ * groups put forward their views on a question. The AI's job is therefore to
+ * help the conversation — summarise where each group stands, surface real
+ * agreement and disagreement, and point at what nobody has said yet — NOT to
+ * declare a winner or score students.
  *
- * Bias controls (LLM-judge position/verbosity/name bias is documented and
- * reproducible):
- *   - Speaker NAMES ARE STRIPPED before the transcript reaches the model; it
- *     sees only "RED-1 / BLUE-2" role labels.
- *   - The rubric bands are explicitly anchored, with band 3 = "meets
- *     expectations", to resist score compression/inflation.
- *   - Delivery is NOT scored: you cannot judge delivery from a transcript.
+ * Bias control retained from the earlier design: speaker NAMES ARE STRIPPED
+ * before the transcript reaches the model; it sees only group labels, so its
+ * read of an argument can't be coloured by who made it.
  */
 
-import type { DebateTurnRow } from '@vta/data';
+import type { DebateTurnRow, DiscussionTeam } from '@vta/data';
 import { chat } from './openrouter';
 
-export interface RubricCriterion {
-  readonly id: string;
+export interface TeamInsight {
+  readonly teamId: string;
   readonly label: string;
-  readonly weight: number;
-  readonly description: string;
+  /** The group's main claims, in the AI's words. */
+  readonly points: string[];
+  /** One concrete, constructive suggestion for that group. */
+  readonly suggestion: string;
 }
 
-export const RUBRIC: RubricCriterion[] = [
-  {
-    id: 'ARG',
-    label: 'Argumentation & reasoning',
-    weight: 30,
-    description: 'Claim → warrant → impact chains; logical validity; absence of fallacy.',
-  },
-  {
-    id: 'EVI',
-    label: 'Evidence & grounding',
-    weight: 25,
-    description: 'Specific, attributable support rather than assertion.',
-  },
-  {
-    id: 'REF',
-    label: 'Refutation & clash',
-    weight: 25,
-    description: 'Directly engages the other side’s strongest points.',
-  },
-  {
-    id: 'ORG',
-    label: 'Organization & role fulfilment',
-    weight: 20,
-    description: 'Clear structure; the speech does the job its slot requires.',
-  },
-];
-
-export interface JudgeScores {
-  readonly red: Record<string, number>;
-  readonly blue: Record<string, number>;
-  readonly redTotal: number;
-  readonly blueTotal: number;
-  readonly winner: 'red' | 'blue' | 'tie';
+export interface DiscussionInsight {
+  readonly teams: TeamInsight[];
+  readonly agreements: string[];
+  readonly disagreements: string[];
+  /** Angles nobody raised — the most useful thing an AI adds to a discussion. */
+  readonly gaps: string[];
+  /** A question the professor could put to the room next. */
+  readonly nextQuestion: string;
 }
 
-export interface JudgeVerdict {
-  readonly scores: JudgeScores;
-  readonly rationale: string;
+export interface AssistantResult {
+  readonly insight: DiscussionInsight;
+  readonly summary: string;
   readonly model: string;
 }
 
-/**
- * Render the transcript with names replaced by role labels (RED-1, BLUE-2, …),
- * so the judge cannot be swayed by who said it.
- */
-export function anonymizeTranscript(turns: readonly DebateTurnRow[]): string {
-  const slots = new Map<string, string>();
-  const counts: Record<string, number> = { red: 0, blue: 0, observer: 0 };
+/** Group turns by team, with names replaced by group labels. */
+export function anonymizeTranscript(
+  turns: readonly DebateTurnRow[],
+  teams: readonly DiscussionTeam[],
+): string {
+  const labelFor = (id: string): string =>
+    teams.find((t) => t.id === id)?.label ?? (id === 'observer' ? 'Unaligned' : id);
+  const seats = new Map<string, string>();
+  const counts: Record<string, number> = {};
   const lines: string[] = [];
   for (const t of turns) {
     const key = `${t.team}:${t.speakerName}`;
-    let slot = slots.get(key);
-    if (slot === undefined) {
-      const team = t.team === 'red' || t.team === 'blue' ? t.team : 'observer';
-      counts[team] = (counts[team] ?? 0) + 1;
-      slot = `${team.toUpperCase()}-${counts[team]}`;
-      slots.set(key, slot);
+    let seat = seats.get(key);
+    if (seat === undefined) {
+      counts[t.team] = (counts[t.team] ?? 0) + 1;
+      seat = `${labelFor(t.team)} #${counts[t.team]}`;
+      seats.set(key, seat);
     }
-    lines.push(`[${t.phase}] ${slot}: ${t.text}`);
+    lines.push(`${seat}: ${t.text}`);
   }
   return lines.join('\n');
 }
 
 const SYSTEM = [
-  'You are an impartial competitive-debate judge for a university classroom debate.',
-  'You are given an anonymized transcript: speakers appear only as RED-n / BLUE-n role labels.',
+  'You are helping a university instructor run a CLASSROOM DISCUSSION.',
+  'Several groups have been putting forward their views on a question. You are given an',
+  'anonymized transcript: speakers appear only as their group label and a number.',
   '',
-  'Score EACH TEAM on each rubric criterion using a 0-5 band:',
-  '  5 = outstanding · 4 = strong · 3 = MEETS EXPECTATIONS · 2 = developing · 1 = weak · 0 = absent',
-  'Band 3 is the normal, competent classroom standard — use the full range and do not cluster.',
+  'Your job is to help the conversation, NOT to judge it. Specifically:',
+  '- Summarise what each group actually argued, in plain language, faithful to what they said.',
+  '- Identify genuine points of AGREEMENT across groups (often more than participants realise).',
+  '- Identify the real DISAGREEMENTS — the crux, not superficial wording differences.',
+  '- Name important angles, evidence, or consequences that NOBODY raised. This is the most',
+  '  valuable thing you can add; be specific and substantive, not generic.',
+  '- Offer each group ONE constructive, actionable suggestion to strengthen their thinking.',
+  '- Propose ONE good question the instructor could put to the room next.',
   '',
-  'Rules you must follow:',
-  '- Judge only what is in the transcript. Do not reward length; a longer speech is not a better one.',
-  '- Do not score delivery, tone, or speaking style — a transcript cannot show them.',
-  '- Ignore which side spoke first; order is an artifact of the format, not a merit.',
-  '- If a team never engaged the other side, REF must be low regardless of how polished they were.',
+  'Rules:',
+  '- Do NOT declare a winner, rank the groups, or assign any score. This is not a competition.',
+  '- Be encouraging and specific. Quote or paraphrase real moments from the transcript.',
+  '- If a group barely spoke, say so plainly rather than inventing a position for them.',
   '',
-  'Return STRICT JSON only, no prose outside it, in exactly this shape:',
-  '{"red":{"ARG":n,"EVI":n,"REF":n,"ORG":n},"blue":{"ARG":n,"EVI":n,"REF":n,"ORG":n},',
-  ' "winner":"red"|"blue"|"tie","rationale":"3-6 sentences citing specific moments, plus one concrete improvement for each side"}',
+  'Return STRICT JSON only, no prose outside it:',
+  '{"teams":[{"teamId":"<id>","points":["..."],"suggestion":"..."}],',
+  ' "agreements":["..."],"disagreements":["..."],"gaps":["..."],',
+  ' "nextQuestion":"...","summary":"2-4 sentences an instructor could read aloud"}',
 ].join('\n');
-
-/** Weighted 0-100 total from 0-5 band scores. */
-function weightedTotal(bands: Record<string, number>): number {
-  let total = 0;
-  for (const c of RUBRIC) {
-    const band = Math.max(0, Math.min(5, Number(bands[c.id] ?? 0)));
-    total += (band / 5) * c.weight;
-  }
-  return Math.round(total * 10) / 10;
-}
 
 function extractJson(raw: string): unknown {
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
   const body = fenced?.[1] ?? raw;
   const start = body.indexOf('{');
   const end = body.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) throw new Error('judge returned no JSON object');
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error('the assistant returned no JSON object');
+  }
   return JSON.parse(body.slice(start, end + 1));
 }
 
-/** Run the judge over a session's transcript. Throws if the transcript is empty. */
-export async function judgeDebate(
+function strings(v: unknown, max = 6): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => String(x ?? '').trim()).filter((x) => x !== '').slice(0, max);
+}
+
+/** Analyse the discussion so far. Throws if nothing has been said. */
+export async function analyzeDiscussion(
   topic: string,
   turns: readonly DebateTurnRow[],
-): Promise<JudgeVerdict> {
+  teams: readonly DiscussionTeam[],
+): Promise<AssistantResult> {
   const spoken = turns.filter((t) => t.text.trim() !== '');
-  if (spoken.length === 0) throw new Error('nothing has been said yet — no transcript to judge');
+  if (spoken.length === 0) {
+    throw new Error('nothing has been said yet — there is no discussion to summarise');
+  }
 
-  const rubricText = RUBRIC.map((c) => `- ${c.id} (${c.label}, weight ${c.weight}): ${c.description}`).join('\n');
+  const roster = teams.map((t) => `- ${t.id}: ${t.label}`).join('\n');
   const user = [
-    `MOTION: ${topic}`,
+    `QUESTION UNDER DISCUSSION: ${topic}`,
     '',
-    'RUBRIC:',
-    rubricText,
+    'GROUPS:',
+    roster,
     '',
     'TRANSCRIPT:',
-    anonymizeTranscript(spoken),
+    anonymizeTranscript(spoken, teams),
   ].join('\n');
 
-  const raw = await chat(SYSTEM, user, { maxTokens: 1600, role: 'debate.judge' });
+  const raw = await chat(SYSTEM, user, { maxTokens: 2000, role: 'debate.assistant' });
   const parsed = extractJson(raw) as {
-    red?: Record<string, number>;
-    blue?: Record<string, number>;
-    winner?: string;
-    rationale?: string;
+    teams?: { teamId?: string; points?: unknown; suggestion?: unknown }[];
+    agreements?: unknown;
+    disagreements?: unknown;
+    gaps?: unknown;
+    nextQuestion?: unknown;
+    summary?: unknown;
   };
 
-  const red = parsed.red ?? {};
-  const blue = parsed.blue ?? {};
-  const redTotal = weightedTotal(red);
-  const blueTotal = weightedTotal(blue);
-  const declared = parsed.winner;
-  const winner: 'red' | 'blue' | 'tie' =
-    declared === 'red' || declared === 'blue' || declared === 'tie'
-      ? declared
-      : redTotal === blueTotal
-        ? 'tie'
-        : redTotal > blueTotal
-          ? 'red'
-          : 'blue';
+  const byId = new Map((parsed.teams ?? []).map((t) => [String(t.teamId ?? ''), t]));
+  const teamInsights: TeamInsight[] = teams.map((t) => {
+    const got = byId.get(t.id);
+    return {
+      teamId: t.id,
+      label: t.label,
+      points: strings(got?.points),
+      suggestion: String(got?.suggestion ?? '').trim(),
+    };
+  });
 
   return {
-    scores: { red, blue, redTotal, blueTotal, winner },
-    rationale: parsed.rationale ?? '(no rationale returned)',
+    insight: {
+      teams: teamInsights,
+      agreements: strings(parsed.agreements),
+      disagreements: strings(parsed.disagreements),
+      gaps: strings(parsed.gaps),
+      nextQuestion: String(parsed.nextQuestion ?? '').trim(),
+    },
+    summary: String(parsed.summary ?? '').trim() || '(no summary returned)',
     model: 'anthropic/claude-opus-4.8',
   };
 }

@@ -26,9 +26,27 @@ import { courses } from "./courses.js";
  * authentication claim.
  */
 
-/** Two-team red (proposition) vs blue (opposition) format, plus non-debating roles. */
-export const DEBATE_TEAMS = ["red", "blue", "observer"] as const;
-export type DebateTeam = (typeof DEBATE_TEAMS)[number];
+/**
+ * One group in a discussion. A session has 2-4 of them (for/against, or several
+ * perspectives) plus the implicit "observer" bucket for anyone not taking a side.
+ */
+export interface DiscussionTeam {
+  /** Stable id stored on participants and turns. */
+  readonly id: string;
+  /** What students see, e.g. "For", "Against", "Regulators". */
+  readonly label: string;
+  /** Hex colour used consistently across the console, room and transcript. */
+  readonly color: string;
+}
+
+/** Default two-sided setup; the professor can rename these or add up to four. */
+export const DEFAULT_TEAMS: DiscussionTeam[] = [
+  { id: "red", label: "For", color: "#c0392b" },
+  { id: "blue", label: "Against", color: "#1f6feb" },
+];
+
+/** Palette used when a session adds a third / fourth group. */
+export const TEAM_PALETTE = ["#c0392b", "#1f6feb", "#1a7f37", "#b8860b"] as const;
 
 /** Lifecycle of one classroom activity. */
 export const DEBATE_STATUSES = ["lobby", "live", "judging", "ended"] as const;
@@ -44,11 +62,17 @@ export const debateSessions = pgTable(
       .references(() => courses.id, { onDelete: "cascade" }),
     /** Email of the professor who created it (from the dashboard session). */
     createdBy: text("created_by").notNull(),
-    /** The debate motion / topic shown to students. */
+    /** The question / motion under discussion, shown to students. */
     topic: text("topic").notNull(),
     status: text("status").notNull().default("lobby"),
-    /** Free-form phase label driven by the professor console, e.g. 'Opening — Red'. */
-    phase: text("phase").notNull().default("Lobby"),
+    /** The 2-4 groups taking part. See {@link DiscussionTeam}. */
+    teams: jsonb("teams").$type<DiscussionTeam[]>().notNull().default(DEFAULT_TEAMS),
+    /**
+     * Optional free-text label the professor can set (e.g. "Round 2"). Purely a
+     * tag stamped onto turns — it enforces nothing. There is no fixed running
+     * order: this is a discussion, not a formal debate format.
+     */
+    phase: text("phase").notNull().default("Discussion"),
     /** Monotonic counter — optimistic concurrency for phase transitions. */
     phaseSeq: integer("phase_seq").notNull().default(0),
     /** Optional countdown for the current phase. */

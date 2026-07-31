@@ -20,6 +20,7 @@ export function NewDebateForm() {
   const [courses, setCourses] = useState<Course[]>([]);
   const [courseId, setCourseId] = useState('');
   const [topic, setTopic] = useState('');
+  const [teams, setTeams] = useState<string[]>(['For', 'Against']);
   const [recent, setRecent] = useState<SessionRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +56,7 @@ export function NewDebateForm() {
     const res = await fetch('/api/debate/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ courseId, topic }),
+      body: JSON.stringify({ courseId, topic, teams }),
     });
     const data = (await res.json().catch(() => ({}))) as {
       session?: { id: string };
@@ -72,7 +73,7 @@ export function NewDebateForm() {
   return (
     <>
       <section className="card" style={{ marginTop: 20 }}>
-        <h3>New debate</h3>
+        <h3>New discussion</h3>
         <form onSubmit={create} style={{ marginTop: 12 }}>
           <label htmlFor="course">Course</label>
           <select
@@ -99,17 +100,71 @@ export function NewDebateForm() {
 
           <div style={{ height: 14 }} />
 
-          <label htmlFor="topic">Motion</label>
+          <label htmlFor="topic">Question / topic</label>
           <input
             id="topic"
             type="text"
-            placeholder="This house believes that AI should be regulated by an independent agency."
+            placeholder="Should AI be regulated by an independent agency?"
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
             required
           />
 
-          <button className="primary" type="submit" disabled={busy || courseId === '' || topic.trim() === ''}>
+          <div style={{ height: 14 }} />
+          <label>Groups ({teams.length})</label>
+          <p className="sub" style={{ margin: '0 0 8px', fontSize: 13 }}>
+            Two sides, or up to four perspectives. Students pick one when they join.
+          </p>
+          {teams.map((t, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <span
+                style={{
+                  width: 10,
+                  borderRadius: 4,
+                  background: ['#c0392b', '#1f6feb', '#1a7f37', '#b8860b'][i],
+                  flexShrink: 0,
+                }}
+              />
+              <input
+                type="text"
+                value={t}
+                maxLength={32}
+                placeholder={`Group ${i + 1}`}
+                onChange={(e) =>
+                  setTeams((prev) => prev.map((x, j) => (j === i ? e.target.value : x)))
+                }
+              />
+              {teams.length > 2 && (
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => setTeams((prev) => prev.filter((_, j) => j !== i))}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          ))}
+          {teams.length < 4 && (
+            <button
+              type="button"
+              className="link"
+              onClick={() => setTeams((prev) => [...prev, ''])}
+            >
+              + Add a group
+            </button>
+          )}
+
+          <button
+            className="primary"
+            type="submit"
+            disabled={
+              busy ||
+              courseId === '' ||
+              topic.trim() === '' ||
+              teams.filter((t) => t.trim() !== '').length < 2
+            }
+          >
             {busy ? 'Creating…' : 'Create & open console'}
           </button>
           {error !== null && <p className="error">{error}</p>}

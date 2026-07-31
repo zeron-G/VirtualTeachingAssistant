@@ -4,18 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDebateStream } from '@/lib/useDebateStream';
 import type { Snapshot } from '@/lib/useDebateStream';
 
-/** Suggested running order for the red/blue format. The professor can free-type too. */
-const PHASES = [
-  'Lobby',
-  'Opening — Red',
-  'Opening — Blue',
-  'Rebuttal — Red',
-  'Rebuttal — Blue',
-  'Open clash',
-  'Closing — Red',
-  'Closing — Blue',
-  'Judging',
-];
+const OBSERVER = { id: 'observer', label: 'Unaligned', color: '#5b6672' };
 
 export function Console({
   initial,
@@ -124,19 +113,26 @@ export function Console({
     }
   }
 
-  async function confirmJudge(judgementId: string) {
-    await fetch(`/api/debate/sessions/${session.id}/judge`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ judgementId }),
-    });
-  }
-
-  const red = participants.filter((p) => p.team === 'red');
-  const blue = participants.filter((p) => p.team === 'blue');
-  const others = participants.filter((p) => p.team !== 'red' && p.team !== 'blue');
-  const scores = judgement?.scores as
-    | { redTotal?: number; blueTotal?: number; winner?: string }
+  const teams = session.teams ?? [];
+  const teamIds = new Set(teams.map((t) => t.id));
+  /** Every configured group, plus an Unaligned bucket when anyone is in it. */
+  const groups = [
+    ...teams.map((t) => ({ ...t, members: participants.filter((p) => p.team === t.id) })),
+    {
+      ...OBSERVER,
+      members: participants.filter((p) => !teamIds.has(p.team)),
+    },
+  ].filter((g) => g.id !== 'observer' || g.members.length > 0);
+  const colorOf = (id: string): string =>
+    teams.find((t) => t.id === id)?.color ?? OBSERVER.color;
+  const insight = judgement?.scores as
+    | {
+        teams?: { teamId: string; label: string; points: string[]; suggestion: string }[];
+        agreements?: string[];
+        disagreements?: string[];
+        gaps?: string[];
+        nextQuestion?: string;
+      }
     | undefined;
 
   return (
@@ -144,13 +140,13 @@ export function Console({
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark">VTA</div>
-          <div className="brand-name">Debate console</div>
+          <div className="brand-name">Discussion console</div>
         </div>
         <div className="identity">
           <span>{professorEmail}</span>
           <span className="badge">{session.status}</span>
           <a className="link" href="/debate">
-            ← All debates
+            ← All discussions
           </a>
         </div>
       </header>
@@ -160,8 +156,7 @@ export function Console({
           <div>
             <h1 style={{ marginBottom: 4 }}>{session.topic}</h1>
             <p className="sub">
-              Phase: <strong>{session.phase}</strong> · {participants.length} joined ·{' '}
-              {turns.length} turns
+              {participants.length} joined · {turns.length} contributions
             </p>
           </div>
           {session.status !== 'ended' && (
@@ -170,13 +165,13 @@ export function Console({
               className="link"
               disabled={busy}
               onClick={() => {
-                if (window.confirm('End this debate? Students will no longer be able to speak.')) {
+                if (window.confirm('End this discussion? Students will no longer be able to speak.')) {
                   void patch({ endNow: true });
                 }
               }}
               style={{ whiteSpace: 'nowrap' }}
             >
-              End debate
+              End discussion
             </button>
           )}
         </div>
@@ -239,37 +234,6 @@ export function Console({
           )}
         </section>
 
-        {/* ---- Phase control ---- */}
-        <section className="card" style={{ marginTop: 16 }}>
-          <h3>Phase</h3>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-            {PHASES.map((p) => (
-              <button
-                key={p}
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  void patch({
-                    phase: p,
-                    status: p === 'Lobby' ? 'lobby' : p === 'Judging' ? 'judging' : 'live',
-                  })
-                }
-                className="link"
-                style={{
-                  padding: '7px 12px',
-                  borderRadius: 999,
-                  border: '1px solid var(--border)',
-                  background: session.phase === p ? 'var(--hopkins)' : 'transparent',
-                  color: session.phase === p ? '#fff' : 'var(--text)',
-                  fontWeight: 600,
-                }}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-        </section>
-
         {/* ---- Floor control ---- */}
         <section className="card" style={{ marginTop: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -296,21 +260,17 @@ export function Console({
           </div>
           <p className="sub" style={{ marginTop: 6 }}>
             {session.openFloor !== false
-              ? 'OPEN FLOOR (default): anyone can switch their own mic on and off. Untick it to run a strict turn-taking debate.'
+              ? 'OPEN FLOOR (default): anyone can switch their own mic on and off. Untick it to take turns instead.'
               : 'Turn-taking: only the person you give the floor to can record. ✋ marks a student asking to speak.'}
           </p>
-          {(
-            [
-              ['Red (proposition)', red, '#c0392b'],
-              ['Blue (opposition)', blue, '#1f6feb'],
-              ['Observers', others, 'var(--muted)'],
-            ] as const
-          ).map(([label, list, color]) => (
-            <div key={label} style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color }}>{label}</div>
+          {groups.map((g) => (
+            <div key={g.id} style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: g.color }}>
+                {g.label} · {g.members.length}
+              </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
-                {list.length === 0 && <span className="sub">nobody yet</span>}
-                {list.map((p) => {
+                {g.members.length === 0 && <span className="sub">nobody yet</span>}
+                {g.members.map((p) => {
                   const holds = session.floorParticipantId === p.id;
                   const raised = p.handRaisedAt != null;
                   return (
@@ -346,53 +306,71 @@ export function Console({
           <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
             {turns.map((t) => (
               <div key={t.id}>
-                <span
-                  style={{
-                    fontWeight: 700,
-                    color: t.team === 'red' ? '#c0392b' : t.team === 'blue' ? '#1f6feb' : 'var(--muted)',
-                  }}
-                >
-                  {t.speakerName}
-                </span>
-                <span className="sub" style={{ fontSize: 12 }}>
-                  {' '}
-                  · {t.phase}
-                </span>
+                <span style={{ fontWeight: 700, color: colorOf(t.team) }}>{t.speakerName}</span>
                 <div>{t.text}</div>
               </div>
             ))}
           </div>
         </section>
 
-        {/* ---- Judge ---- */}
+        {/* ---- AI assistant ---- */}
         <section className="card" style={{ marginTop: 16, marginBottom: 40 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0 }}>AI judge</h3>
+            <h3 style={{ margin: 0 }}>AI assistant</h3>
             <button className="link" type="button" disabled={judging} onClick={() => void runJudge()}>
-              {judging ? 'Working…' : 'Run judge'}
+              {judging ? 'Reading the discussion…' : 'Summarise the discussion'}
             </button>
           </div>
           <p className="sub" style={{ marginTop: 6 }}>
-            Advisory only — names are hidden from the judge, and you confirm the result.
+            Summarises each group, finds agreement and disagreement, and points at what nobody
+            said. It does not score anyone or pick a winner. Names are hidden from it.
           </p>
+
           {judgement !== undefined && (
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>
-                Red {scores?.redTotal ?? '?'} — {scores?.blueTotal ?? '?'} Blue{' '}
-                <span className="badge">{scores?.winner ?? '?'}</span>{' '}
-                {judgement.isFinal ? (
-                  <span className="badge">confirmed</span>
-                ) : (
-                  <button
-                    type="button"
-                    className="link"
-                    onClick={() => void confirmJudge(judgement.id)}
-                  >
-                    Confirm
-                  </button>
-                )}
-              </div>
-              <p style={{ marginTop: 8 }}>{judgement.rationale}</p>
+            <div style={{ marginTop: 14 }}>
+              <p style={{ fontSize: 15 }}>{judgement.rationale}</p>
+
+              {(insight?.teams ?? []).map((t) => (
+                <div key={t.teamId} style={{ marginTop: 14 }}>
+                  <div style={{ fontWeight: 700, color: colorOf(t.teamId) }}>{t.label}</div>
+                  <ul style={{ margin: '6px 0 0', paddingLeft: 20 }}>
+                    {t.points.map((pt, i) => (
+                      <li key={i}>{pt}</li>
+                    ))}
+                  </ul>
+                  {t.suggestion !== '' && (
+                    <p className="sub" style={{ marginTop: 4 }}>
+                      → {t.suggestion}
+                    </p>
+                  )}
+                </div>
+              ))}
+
+              {(
+                [
+                  ['Common ground', insight?.agreements ?? []],
+                  ['Where they disagree', insight?.disagreements ?? []],
+                  ['Nobody mentioned', insight?.gaps ?? []],
+                ] as const
+              ).map(([label, items]) =>
+                items.length === 0 ? null : (
+                  <div key={label} style={{ marginTop: 14 }}>
+                    <div style={{ fontWeight: 700 }}>{label}</div>
+                    <ul style={{ margin: '6px 0 0', paddingLeft: 20 }}>
+                      {items.map((x, i) => (
+                        <li key={i}>{x}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ),
+              )}
+
+              {insight?.nextQuestion !== undefined && insight.nextQuestion !== '' && (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ fontWeight: 700 }}>Ask the room next</div>
+                  <p style={{ marginTop: 4 }}>{insight.nextQuestion}</p>
+                </div>
+              )}
             </div>
           )}
         </section>

@@ -15,6 +15,7 @@ export interface Snapshot {
     joinCode: string;
     requireTicket?: boolean;
     openFloor?: boolean;
+    teams?: { id: string; label: string; color: string }[];
   };
   participants: {
     id: string;

@@ -4,7 +4,7 @@ import type { NextRequest } from 'next/server';
 import { SESSION_COOKIE, readSessionToken } from '@/lib/auth';
 import { debateRepo } from '@/lib/db';
 import { publish } from '@/lib/hub';
-import { judgeDebate } from '@/lib/judge';
+import { analyzeDiscussion } from '@/lib/judge';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -29,19 +29,22 @@ export async function POST(
   if (session === undefined) return NextResponse.json({ error: 'Not found.' }, { status: 404 });
 
   const turns = await repo.listTurns(id);
-  let verdict;
+  let result;
   try {
-    verdict = await judgeDebate(session.topic, turns);
+    result = await analyzeDiscussion(session.topic, turns, session.teams);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'The judge could not produce a verdict.';
+    const message =
+      err instanceof Error ? err.message : 'The assistant could not analyse the discussion.';
     return NextResponse.json({ error: message }, { status: 502 });
   }
 
+  // Reuses the judgements table: `scores` carries the structured insight and
+  // `rationale` the read-aloud summary. Still advisory — a professor confirms.
   const judgement = await repo.addJudgement({
     sessionId: id,
-    scores: verdict.scores,
-    rationale: verdict.rationale,
-    model: verdict.model,
+    scores: result.insight,
+    rationale: result.summary,
+    model: result.model,
     isFinal: false,
   });
 

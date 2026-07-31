@@ -28,9 +28,9 @@ export default async function DebateIndexPage() {
       </header>
 
       <main className="container">
-        <h1>Classroom debate</h1>
+        <h1>Classroom discussion</h1>
         <p className="sub">
-          Start a red vs blue debate. Students join by scanning a QR code — no account needed.
+          Set a question, let each group put their view, and have the AI summarise the room. Students join by scanning a QR code — no account needed.
         </p>
         <NewDebateForm />
       </main>

@@ -40,6 +40,7 @@ export default async function JoinPage(props: {
       resumeParticipantId={resumeParticipantId}
       ticket={ticket}
       requireTicket={session.requireTicket}
+      teams={session.teams}
     />
   );
 }

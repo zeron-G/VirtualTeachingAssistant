@@ -6,8 +6,6 @@ import type { FormEvent } from 'react';
 import { useDebateStream } from '@/lib/useDebateStream';
 import type { Snapshot } from '@/lib/useDebateStream';
 
-type Team = 'red' | 'blue' | 'observer';
-
 const EMPTY: Snapshot = {
   session: {
     id: '',
@@ -31,6 +29,7 @@ export function Room({
   resumeParticipantId = null,
   ticket = '',
   requireTicket = false,
+  teams,
 }: {
   code: string;
   sessionId: string;
@@ -41,10 +40,12 @@ export function Room({
   /** Rotating check-in ticket from the QR (`?t=`). */
   ticket?: string;
   requireTicket?: boolean;
+  /** The 2-4 groups configured for this discussion. */
+  teams: { id: string; label: string; color: string }[];
 }) {
   const [participantId, setParticipantId] = useState<string | null>(resumeParticipantId);
   const [name, setName] = useState('');
-  const [team, setTeam] = useState<Team>('red');
+  const [team, setTeam] = useState<string>(teams[0]?.id ?? 'red');
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +54,7 @@ export function Room({
     return (
       <div className="auth-wrap">
         <div className="auth-card">
-          <h1>This debate has ended</h1>
+          <h1>This discussion has ended</h1>
           <p className="sub">Ask your instructor for a new code.</p>
         </div>
       </div>
@@ -87,9 +88,9 @@ export function Room({
         <div className="auth-card">
           <div className="brand">
             <div className="brand-mark">VTA</div>
-            <div className="brand-name">Classroom debate</div>
+            <div className="brand-name">Classroom discussion</div>
           </div>
-          <h1>Join the debate</h1>
+          <h1>Join the discussion</h1>
           <p className="sub">{topic}</p>
 
           {requireTicket && ticket === '' && (
@@ -113,34 +114,30 @@ export function Room({
             />
 
             <div style={{ height: 14 }} />
-            <label htmlFor="team">Team</label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {(
-                [
-                  ['red', 'Red — for', '#c0392b'],
-                  ['blue', 'Blue — against', '#1f6feb'],
-                  ['observer', 'Observer', '#5b6672'],
-                ] as const
-              ).map(([value, label, color]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setTeam(value)}
-                  style={{
-                    flex: 1,
-                    padding: '10px 6px',
-                    borderRadius: 10,
-                    border: `2px solid ${team === value ? color : 'var(--border)'}`,
-                    background: team === value ? color : 'var(--bg)',
-                    color: team === value ? '#fff' : 'var(--text)',
-                    fontWeight: 700,
-                    fontSize: 13,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
+            <label htmlFor="team">Your group</label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {[...teams, { id: 'observer', label: 'Just listening', color: '#5b6672' }].map(
+                (t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setTeam(t.id)}
+                    style={{
+                      flex: '1 1 40%',
+                      padding: '10px 6px',
+                      borderRadius: 10,
+                      border: `2px solid ${team === t.id ? t.color : 'var(--border)'}`,
+                      background: team === t.id ? t.color : 'var(--bg)',
+                      color: team === t.id ? '#fff' : 'var(--text)',
+                      fontWeight: 700,
+                      fontSize: 13,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {t.label}
+                  </button>
+                ),
+              )}
             </div>
 
             <label
@@ -162,7 +159,7 @@ export function Room({
               <span>
                 I understand that when I hold the microphone my speech is recorded and
                 transcribed for this class activity, that the transcript is shown to my
-                instructor and classmates, and that an AI will comment on the debate.
+                instructor and classmates, and that an AI will summarise the discussion.
               </span>
             </label>
 
@@ -176,11 +173,21 @@ export function Room({
     );
   }
 
-  return <LiveRoom sessionId={sessionId} participantId={participantId} />;
+  return <LiveRoom sessionId={sessionId} participantId={participantId} teams={teams} />;
 }
 
-/** The in-debate view: shows the phase, and opens the mic only when you hold the floor. */
-function LiveRoom({ sessionId, participantId }: { sessionId: string; participantId: string }) {
+/** The in-discussion view: transcript plus the microphone control. */
+function LiveRoom({
+  sessionId,
+  participantId,
+  teams,
+}: {
+  sessionId: string;
+  participantId: string;
+  teams: { id: string; label: string; color: string }[];
+}) {
+  const colorOf = (id: string): string =>
+    teams.find((t) => t.id === id)?.color ?? 'var(--muted)';
   const snapshot = useDebateStream(sessionId, { ...EMPTY, session: { ...EMPTY.session, id: sessionId } });
   const { session, turns } = snapshot;
   const me = snapshot.participants.find((p) => p.id === participantId);
@@ -329,15 +336,14 @@ function LiveRoom({ sessionId, participantId }: { sessionId: string; participant
     }
   }
 
-  const teamColor =
-    me?.team === 'red' ? '#c0392b' : me?.team === 'blue' ? '#1f6feb' : 'var(--muted)';
+  const teamColor = colorOf(me?.team ?? '');
 
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark">VTA</div>
-          <div className="brand-name">{session.phase}</div>
+          <div className="brand-name">Discussion</div>
         </div>
         <div className="identity">
           <span>{me?.displayName ?? '…'}</span>
@@ -354,14 +360,7 @@ function LiveRoom({ sessionId, participantId }: { sessionId: string; participant
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
           {turns.map((t) => (
             <div key={t.id}>
-              <span
-                style={{
-                  fontWeight: 700,
-                  color: t.team === 'red' ? '#c0392b' : t.team === 'blue' ? '#1f6feb' : 'var(--muted)',
-                }}
-              >
-                {t.speakerName}
-              </span>
+              <span style={{ fontWeight: 700, color: colorOf(t.team) }}>{t.speakerName}</span>
               <div>{t.text}</div>
             </div>
           ))}
