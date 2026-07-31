@@ -6,7 +6,7 @@
  * and makes reconnect free (a fresh connect just fetches the snapshot again).
  *
  * Correct ONLY because the web Container App runs min=max=1 replica. Scaling out
- * requires a shared backplane (Redis pub/sub) — see docs/DESIGN-CLASSROOM-DEBATE.md.
+ * requires a shared backplane (Redis pub/sub) — see docs/DESIGN-CLASSROOM-DISCUSSION.md.
  * Cached on globalThis so Next.js dev HMR doesn't create a second hub.
  */
 

@@ -37,7 +37,6 @@ export interface Snapshot {
     scores: unknown;
     rationale: string;
     model: string;
-    isFinal: boolean;
   };
 }
 

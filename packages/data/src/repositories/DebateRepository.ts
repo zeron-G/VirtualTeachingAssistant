@@ -196,13 +196,6 @@ export class DebateRepository {
     return rows[0];
   }
 
-  /** Professor confirms (or overrides) an advisory AI verdict. */
-  async confirmJudgement(id: string, confirmedBy: string): Promise<void> {
-    await this.db
-      .update(debateJudgements)
-      .set({ isFinal: true, confirmedBy })
-      .where(eq(debateJudgements.id, id));
-  }
 
   /* --------------------------------------------------------------- snapshot */
 

@@ -12,17 +12,18 @@ import {
 import { courses } from "./courses.js";
 
 /**
- * Classroom debate module — see `docs/DESIGN-CLASSROOM-DEBATE.md`.
+ * Classroom discussion module — see `docs/DESIGN-CLASSROOM-DISCUSSION.md`.
+ * Tables keep the `debate_` prefix: renaming them on a live pilot buys nothing.
  *
- * ATTRIBUTION MODEL (load-bearing): speech is attributed by DEVICE IDENTITY +
- * FLOOR CONTROL, never by a voiceprint. Exactly one participant holds the floor
- * at a time (`debate_sessions.floor_participant_id`); only that participant's
- * phone opens a microphone, and the resulting clip is theirs by construction.
- * No biometric data is collected or stored anywhere in this schema.
+ * ATTRIBUTION MODEL (load-bearing): speech is attributed by DEVICE IDENTITY,
+ * never by a voiceprint. A clip is uploaded by the phone that recorded it, and
+ * that phone already claimed a named seat, so the clip is that person's by
+ * construction. No biometric data is collected or stored anywhere in this
+ * schema. See `openFloor` below for who is allowed to open a microphone.
  *
  * Participants are session-scoped and are deliberately NOT rows in `users`
  * (which requires a Discord id). A pilot roster is 20-60 people who type their
- * own name; identity here is "good enough for a classroom game", not an
+ * own name; identity here is "good enough for a classroom activity", not an
  * authentication claim.
  */
 
@@ -52,7 +53,7 @@ export const TEAM_PALETTE = ["#c0392b", "#1f6feb", "#1a7f37", "#b8860b"] as cons
 export const DEBATE_STATUSES = ["lobby", "live", "judging", "ended"] as const;
 export type DebateStatus = (typeof DEBATE_STATUSES)[number];
 
-/** One classroom debate activity, owned by a course. */
+/** One classroom discussion activity, owned by a course. */
 export const debateSessions = pgTable(
   "debate_sessions",
   {
@@ -73,11 +74,11 @@ export const debateSessions = pgTable(
      * order: this is a discussion, not a formal debate format.
      */
     phase: text("phase").notNull().default("Discussion"),
-    /** Monotonic counter — optimistic concurrency for phase transitions. */
+    /** Monotonic counter — optimistic concurrency on session updates. */
     phaseSeq: integer("phase_seq").notNull().default(0),
-    /** Optional countdown for the current phase. */
+    /** Optional countdown the professor can set. Unused by default. */
     phaseEndsAt: timestamp("phase_ends_at", { withTimezone: true }),
-    /** Who currently holds the microphone. Null = nobody may record. */
+    /** Who was handed the microphone. Only meaningful when `openFloor` is off. */
     floorParticipantId: uuid("floor_participant_id"),
     /** Short human-typable join code (Crockford base32, no I/L/O/U). */
     joinCode: text("join_code").notNull().unique(),
@@ -91,7 +92,7 @@ export const debateSessions = pgTable(
     /**
      * DEFAULT ON: any consented participant may open their own microphone
      * whenever they want. The professor can switch it off to run a strict
-     * turn-taking debate, in which case only `floorParticipantId` may record.
+     * turn-taking format, in which case only `floorParticipantId` may record.
      */
     openFloor: boolean("open_floor").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -102,7 +103,7 @@ export const debateSessions = pgTable(
   }),
 );
 
-/** A student who joined one session by typing their name and picking a team. */
+/** A student who joined one session by typing their name and picking a group. */
 export const debateParticipants = pgTable(
   "debate_participants",
   {
@@ -167,12 +168,15 @@ export const debateJudgements = pgTable(
     sessionId: uuid("session_id")
       .notNull()
       .references(() => debateSessions.id, { onDelete: "cascade" }),
-    /** Rubric scores + per-team totals, shape owned by the judge prompt. */
+    /** The structured insight (per-group points, agreements, gaps, next question). */
     scores: jsonb("scores").notNull().default({}),
+    /** Short prose summary the professor can read out. */
     rationale: text("rationale").notNull(),
     model: text("model").notNull(),
-    isFinal: boolean("is_final").notNull().default(false),
-    confirmedBy: text("confirmed_by"),
+    // NOTE: `is_final` / `confirmed_by` still exist in Postgres from the earlier
+    // "professor confirms the verdict" design. There is no verdict to confirm
+    // now, so they are omitted here rather than dropped — the column defaults
+    // keep inserts working, and dropping them buys nothing on a live pilot.
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
