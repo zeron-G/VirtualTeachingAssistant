@@ -29,6 +29,8 @@ export function Room({
   topic,
   ended,
   resumeParticipantId = null,
+  ticket = '',
+  requireTicket = false,
 }: {
   code: string;
   sessionId: string;
@@ -36,6 +38,9 @@ export function Room({
   ended: boolean;
   /** Set when a valid participant cookie already exists — skip the join form. */
   resumeParticipantId?: string | null;
+  /** Rotating check-in ticket from the QR (`?t=`). */
+  ticket?: string;
+  requireTicket?: boolean;
 }) {
   const [participantId, setParticipantId] = useState<string | null>(resumeParticipantId);
   const [name, setName] = useState('');
@@ -62,7 +67,7 @@ export function Room({
     const res = await fetch('/api/debate/join', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, name, team, consent }),
+      body: JSON.stringify({ code, name, team, consent, ticket }),
     });
     const data = (await res.json().catch(() => ({}))) as {
       participant?: { id: string };
@@ -86,6 +91,13 @@ export function Room({
           </div>
           <h1>Join the debate</h1>
           <p className="sub">{topic}</p>
+
+          {requireTicket && ticket === '' && (
+            <p className="error" style={{ marginTop: 0 }}>
+              Scan the QR code on the screen to check in — it changes every 30 seconds, so a
+              screenshot or a typed code won&apos;t work.
+            </p>
+          )}
 
           <form onSubmit={join}>
             <label htmlFor="name">Your name</label>
@@ -172,7 +184,18 @@ function LiveRoom({ sessionId, participantId }: { sessionId: string; participant
   const snapshot = useDebateStream(sessionId, { ...EMPTY, session: { ...EMPTY.session, id: sessionId } });
   const { session, turns } = snapshot;
   const me = snapshot.participants.find((p) => p.id === participantId);
-  const hasFloor = session.floorParticipantId === participantId;
+  // You may record when the professor gave you the floor, OR when the whole
+  // room is open (free-discussion phases).
+  const hasFloor = session.floorParticipantId === participantId || session.openFloor === true;
+  const handRaised = me?.handRaisedAt != null;
+
+  async function toggleHand(raised: boolean): Promise<void> {
+    await fetch('/api/debate/hand', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ raised }),
+    }).catch(() => undefined);
+  }
 
   const [recording, setRecording] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -379,9 +402,37 @@ function LiveRoom({ sessionId, participantId }: { sessionId: string; participant
             {uploading ? 'Sending…' : recording ? '● Recording — release to send' : '🎤 Hold to speak'}
           </button>
         ) : (
-          <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '18px 0' }}>
-            Your microphone is off. Wait for your turn.
-          </div>
+          <>
+            <button
+              type="button"
+              onClick={() => void toggleHand(!handRaised)}
+              style={{
+                width: '100%',
+                padding: '18px 16px',
+                borderRadius: 14,
+                border: `2px solid ${handRaised ? '#b8860b' : 'var(--border)'}`,
+                background: handRaised ? '#b8860b' : 'var(--bg)',
+                color: handRaised ? '#fff' : 'var(--text)',
+                fontSize: 16,
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              {handRaised ? '✋ Hand raised — tap to lower' : '✋ Request to speak'}
+            </button>
+            <div
+              style={{
+                textAlign: 'center',
+                color: 'var(--muted)',
+                fontSize: 13,
+                marginTop: 8,
+              }}
+            >
+              {handRaised
+                ? 'Your instructor can see your hand. The mic opens when they give you the floor.'
+                : 'Your microphone is off until your instructor gives you the floor.'}
+            </div>
+          </>
         )}
       </div>
     </div>

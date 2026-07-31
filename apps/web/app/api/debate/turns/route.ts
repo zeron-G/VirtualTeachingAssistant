@@ -46,6 +46,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // not throw the whole speech away. Attribution is unaffected: the speaker is
   // still taken from the authenticated participant, never from the request.
   if (
+    !session.openFloor &&
     session.floorParticipantId !== participant.id &&
     !heldFloorRecently(session.id, participant.id)
   ) {

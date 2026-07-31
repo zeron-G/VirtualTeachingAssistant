@@ -4,6 +4,7 @@ import type { NextRequest } from 'next/server';
 import { debateRepo } from '@/lib/db';
 import { publish } from '@/lib/hub';
 import { allow, clientIp } from '@/lib/rateLimit';
+import { verifyJoinTicket } from '@/lib/joinTicket';
 import {
   PARTICIPANT_COOKIE,
   PARTICIPANT_TTL_SECONDS,
@@ -44,6 +45,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let name: string;
   let team: string;
   let consent: boolean;
+  let ticket: string;
   try {
     const body: unknown = await req.json();
     const b = body as Record<string, unknown>;
@@ -51,6 +53,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     name = String(b.name ?? '').trim().slice(0, MAX_NAME);
     team = String(b.team ?? 'observer').trim();
     consent = b.consent === true;
+    ticket = String(b.ticket ?? '');
   } catch {
     return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
   }
@@ -81,6 +84,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     existing !== null && existing.sessionId === session.id
       ? await repo.findParticipantByDevice(session.id, existing.deviceId)
       : undefined;
+
+  // CHECK-IN GATE: a NEW seat needs a fresh ticket from the rotating QR, which
+  // is only obtainable by scanning the projector while it is displayed. An
+  // already-seated device (a refresh mid-debate) is exempt — it checked in once.
+  if (participant === undefined && session.requireTicket) {
+    if (!(await verifyJoinTicket(session.id, ticket))) {
+      return NextResponse.json(
+        {
+          error:
+            'This code has expired. Scan the QR on the screen again — it changes every 30 seconds.',
+          needsTicket: true,
+        },
+        { status: 403 },
+      );
+    }
+  }
 
   const deviceId = participant?.deviceId ?? existing?.deviceId ?? generateDeviceId();
 

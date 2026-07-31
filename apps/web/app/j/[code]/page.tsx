@@ -8,8 +8,14 @@ import { Room } from './room';
 export const dynamic = 'force-dynamic';
 
 /** Public student landing page for a join code — no login required. */
-export default async function JoinPage(props: { params: Promise<{ code: string }> }) {
+export default async function JoinPage(props: {
+  params: Promise<{ code: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { code } = await props.params;
+  const sp = await props.searchParams;
+  const rawTicket = sp['t'];
+  const ticket = typeof rawTicket === 'string' ? rawTicket : '';
   const repo = debateRepo();
   const session = await repo.getSessionByJoinCode(code);
   if (session === undefined) notFound();
@@ -32,6 +38,8 @@ export default async function JoinPage(props: { params: Promise<{ code: string }
       topic={session.topic}
       ended={session.status === 'ended'}
       resumeParticipantId={resumeParticipantId}
+      ticket={ticket}
+      requireTicket={session.requireTicket}
     />
   );
 }

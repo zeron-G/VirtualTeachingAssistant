@@ -13,12 +13,15 @@ export interface Snapshot {
     phaseSeq: number;
     floorParticipantId: string | null;
     joinCode: string;
+    requireTicket?: boolean;
+    openFloor?: boolean;
   };
   participants: {
     id: string;
     displayName: string;
     team: string;
     consentAt: string | null;
+    handRaisedAt?: string | null;
   }[];
   turns: {
     id: string;

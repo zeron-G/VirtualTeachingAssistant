@@ -86,6 +86,8 @@ export class DebateRepository {
       phaseEndsAt?: Date | null;
       floorParticipantId?: string | null;
       endedAt?: Date | null;
+      requireTicket?: boolean;
+      openFloor?: boolean;
     },
   ): Promise<DebateSessionRow | undefined> {
     const rows = await this.db
@@ -142,7 +144,12 @@ export class DebateRepository {
 
   async updateParticipant(
     id: string,
-    patch: { displayName?: string; team?: string; consentAt?: Date | null },
+    patch: {
+      displayName?: string;
+      team?: string;
+      consentAt?: Date | null;
+      handRaisedAt?: Date | null;
+    },
   ): Promise<DebateParticipantRow | undefined> {
     const rows = await this.db
       .update(debateParticipants)

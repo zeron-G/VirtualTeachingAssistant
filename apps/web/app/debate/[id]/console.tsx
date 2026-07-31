@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDebateStream } from '@/lib/useDebateStream';
 import type { Snapshot } from '@/lib/useDebateStream';
 
@@ -45,6 +45,43 @@ export function Console({
   const [judging, setJudging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showQr, setShowQr] = useState(true);
+
+  // The QR is a ROTATING check-in ticket: it re-mints every 30s so a photo taken
+  // earlier stops working. Students must scan it live to join.
+  const [qr, setQr] = useState(qrDataUrl);
+  const [rotatesIn, setRotatesIn] = useState(30);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let stopped = false;
+    const refresh = async (): Promise<void> => {
+      if (stopped) return;
+      try {
+        const res = await fetch(`/api/debate/sessions/${session.id}/ticket`);
+        if (res.ok) {
+          const d = (await res.json()) as { qrDataUrl?: string; rotateInSeconds?: number };
+          if (!stopped && d.qrDataUrl !== undefined) {
+            setQr(d.qrDataUrl);
+            setRotatesIn(d.rotateInSeconds ?? 30);
+          }
+        }
+      } catch {
+        /* keep showing the previous QR; try again on the next tick */
+      }
+      if (!stopped) timerRef.current = setTimeout(() => void refresh(), 15_000);
+    };
+    void refresh();
+    return () => {
+      stopped = true;
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, [session.id]);
+
+  // Visible countdown so the room can see the code is live.
+  useEffect(() => {
+    const t = setInterval(() => setRotatesIn((s) => (s <= 1 ? 30 : s - 1)), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const patch = useCallback(
     async (body: Record<string, unknown>) => {
@@ -156,13 +193,47 @@ export function Console({
           {showQr && (
             <div style={{ display: 'flex', gap: 24, alignItems: 'center', marginTop: 12, flexWrap: 'wrap' }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={qrDataUrl} alt="Join QR code" width={200} height={200} />
+              <img src={qr} alt="Join QR code" width={220} height={220} />
               <div>
-                <div style={{ fontSize: 13, color: 'var(--muted)' }}>Code</div>
-                <div style={{ fontSize: 44, fontWeight: 800, letterSpacing: 6 }}>
-                  {session.joinCode}
-                </div>
-                <div style={{ fontSize: 14, marginTop: 6 }}>{joinUrl}</div>
+                {session.requireTicket !== false ? (
+                  <>
+                    <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+                      Live check-in — refreshes in {rotatesIn}s
+                    </div>
+                    <div style={{ fontSize: 15, marginTop: 6, maxWidth: 320 }}>
+                      Students must <strong>scan this code</strong> to join. A screenshot or the
+                      typed code alone won&apos;t work.
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 13, color: 'var(--muted)' }}>Code</div>
+                    <div style={{ fontSize: 44, fontWeight: 800, letterSpacing: 6 }}>
+                      {session.joinCode}
+                    </div>
+                    <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
+                      Open joining — anyone with the code can join.
+                    </div>
+                  </>
+                )}
+                <label
+                  style={{
+                    display: 'flex',
+                    gap: 8,
+                    alignItems: 'center',
+                    marginTop: 14,
+                    fontSize: 13,
+                    fontWeight: 400,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={session.requireTicket !== false}
+                    disabled={busy}
+                    onChange={(e) => void patch({ requireTicket: e.target.checked })}
+                  />
+                  Require live QR scan (check-in)
+                </label>
               </div>
             </div>
           )}
@@ -203,17 +274,30 @@ export function Console({
         <section className="card" style={{ marginTop: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ margin: 0 }}>Who has the microphone</h3>
-            <button
-              type="button"
-              className="link"
-              disabled={busy || session.floorParticipantId === null}
-              onClick={() => void patch({ floorParticipantId: null })}
-            >
-              Close the floor
-            </button>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, fontWeight: 400 }}>
+                <input
+                  type="checkbox"
+                  checked={session.openFloor === true}
+                  disabled={busy}
+                  onChange={(e) => void patch({ openFloor: e.target.checked })}
+                />
+                Open floor (everyone)
+              </label>
+              <button
+                type="button"
+                className="link"
+                disabled={busy || session.floorParticipantId === null}
+                onClick={() => void patch({ floorParticipantId: null })}
+              >
+                Close the floor
+              </button>
+            </div>
           </div>
           <p className="sub" style={{ marginTop: 6 }}>
-            Only the person holding the floor can record. Everyone else&apos;s mic stays off.
+            {session.openFloor === true
+              ? 'OPEN FLOOR: every participant can record right now.'
+              : 'Only the person holding the floor can record. ✋ marks a student asking to speak.'}
           </p>
           {(
             [
@@ -228,6 +312,7 @@ export function Console({
                 {list.length === 0 && <span className="sub">nobody yet</span>}
                 {list.map((p) => {
                   const holds = session.floorParticipantId === p.id;
+                  const raised = p.handRaisedAt != null;
                   return (
                     <button
                       key={p.id}
@@ -237,14 +322,14 @@ export function Console({
                       style={{
                         padding: '7px 12px',
                         borderRadius: 999,
-                        border: `1px solid ${holds ? '#1a7f37' : 'var(--border)'}`,
-                        background: holds ? '#1a7f37' : 'var(--bg)',
+                        border: `1px solid ${holds ? '#1a7f37' : raised ? '#b8860b' : 'var(--border)'}`,
+                        background: holds ? '#1a7f37' : raised ? '#fff7e0' : 'var(--bg)',
                         color: holds ? '#fff' : 'var(--text)',
                         cursor: 'pointer',
                         fontWeight: 600,
                       }}
                     >
-                      {holds ? '🎤 ' : ''}
+                      {holds ? '🎤 ' : raised ? '✋ ' : ''}
                       {p.displayName}
                     </button>
                   );

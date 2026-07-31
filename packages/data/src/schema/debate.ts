@@ -57,6 +57,18 @@ export const debateSessions = pgTable(
     floorParticipantId: uuid("floor_participant_id"),
     /** Short human-typable join code (Crockford base32, no I/L/O/U). */
     joinCode: text("join_code").notNull().unique(),
+    /**
+     * When true, joining requires a fresh signed ticket from the ROTATING QR —
+     * i.e. the join code alone is not enough. This is what gives the QR
+     * check-in semantics ("you had to be in the room when it was displayed").
+     * The professor can turn it off to let a latecomer in by code.
+     */
+    requireTicket: boolean("require_ticket").notNull().default(true),
+    /**
+     * When true, any consented participant may record without being granted the
+     * floor — for free-discussion phases (and for testing with one device).
+     */
+    openFloor: boolean("open_floor").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
   },
@@ -79,6 +91,8 @@ export const debateParticipants = pgTable(
     deviceId: text("device_id").notNull(),
     /** Set when the student accepted the recording notice. Null = never record them. */
     consentAt: timestamp("consent_at", { withTimezone: true }),
+    /** Set when the student asks to speak; cleared when the floor is granted or they lower it. */
+    handRaisedAt: timestamp("hand_raised_at", { withTimezone: true }),
     joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

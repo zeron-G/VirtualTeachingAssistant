@@ -29,6 +29,8 @@ export async function POST(
     floorParticipantId?: unknown;
     phaseSeq?: unknown;
     endNow?: unknown;
+    requireTicket?: unknown;
+    openFloor?: unknown;
   };
   try {
     body = (await req.json()) as typeof body;
@@ -47,7 +49,11 @@ export async function POST(
     status?: string;
     floorParticipantId?: string | null;
     endedAt?: Date | null;
+    requireTicket?: boolean;
+    openFloor?: boolean;
   } = {};
+  if (typeof body.requireTicket === 'boolean') patch.requireTicket = body.requireTicket;
+  if (typeof body.openFloor === 'boolean') patch.openFloor = body.openFloor;
   if (typeof body.phase === 'string' && body.phase.trim() !== '') patch.phase = body.phase.trim();
   if (typeof body.status === 'string' && ['lobby', 'live', 'judging', 'ended'].includes(body.status)) {
     patch.status = body.status;
@@ -70,6 +76,11 @@ export async function POST(
     session.floorParticipantId !== patch.floorParticipantId
   ) {
     noteFloorHeld(id, session.floorParticipantId);
+  }
+
+  // Granting the floor answers the request — lower that student's hand.
+  if (typeof patch.floorParticipantId === 'string') {
+    await repo.updateParticipant(patch.floorParticipantId, { handRaisedAt: null });
   }
 
   const updated = await repo.updateSessionState(id, expected, patch);
