@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 
 import { debateRepo } from '@/lib/db';
+import { verifyJoinTicket } from '@/lib/joinTicket';
 import { PARTICIPANT_COOKIE, readParticipantToken } from '@/lib/participant';
 import { Room } from './room';
 
@@ -19,6 +20,11 @@ export default async function JoinPage(props: {
   const repo = debateRepo();
   const session = await repo.getSessionByJoinCode(code);
   if (session === undefined) notFound();
+
+  // Verify here, not just in the API: a made-up `?t=` used to render the full
+  // join form and only fail on submit, which reads as a broken app rather than
+  // "you need to scan the QR".
+  const ticketValid = ticket !== '' && (await verifyJoinTicket(session.id, ticket));
 
   // Resume an existing seat: a refresh, a backgrounded tab, or a phone waking
   // from sleep must land back in the room, not on the join form (where the
@@ -39,6 +45,7 @@ export default async function JoinPage(props: {
       ended={session.status === 'ended'}
       resumeParticipantId={resumeParticipantId}
       ticket={ticket}
+      ticketValid={ticketValid}
       requireTicket={session.requireTicket}
       teams={session.teams}
     />

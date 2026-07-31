@@ -18,22 +18,23 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const MAX_NAME = 40;
-const TEAMS = new Set(['red', 'blue', 'observer']);
+/** Anyone who doesn't take a side. Always available, never in `session.teams`. */
+const OBSERVER = 'observer';
+
+/** A classroom is tens of people, not thousands. */
+const MAX_PARTICIPANTS = 200;
 
 /**
- * POST /api/debate/join { code, name, team, consent }
+ * POST /api/debate/join { code, name, team, ticket, consent }
  *
- * Students type their own name — this is a classroom game, not an authentication
- * claim. `consent` must be true: nothing is recorded for a participant without
- * a consent timestamp (Maryland is an all-party-consent state, and the
- * push-to-talk design means a student only ever records themselves).
+ * Students type their own name — this is a classroom activity, not an
+ * authentication claim. `consent` must be true: nothing is recorded for a
+ * participant without a consent timestamp (Maryland is an all-party-consent
+ * state, and press-to-speak means a student only ever records themselves).
  *
  * Re-joining from the same device resumes the existing seat instead of creating
  * a duplicate, so a refresh or a dropped connection is harmless.
  */
-/** A classroom is tens of people, not thousands. */
-const MAX_PARTICIPANTS = 200;
-
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // The join code is projected on a screen; keep one device from spamming the
   // roster (and the SSE fan-out) with it.
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const b = body as Record<string, unknown>;
     code = String(b.code ?? '').trim().toUpperCase();
     name = String(b.name ?? '').trim().slice(0, MAX_NAME);
-    team = String(b.team ?? 'observer').trim();
+    team = String(b.team ?? OBSERVER).trim();
     consent = b.consent === true;
     ticket = String(b.ticket ?? '');
   } catch {
@@ -61,7 +62,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (code === '' || name === '') {
     return NextResponse.json({ error: 'A join code and your name are required.' }, { status: 400 });
   }
-  if (!TEAMS.has(team)) team = 'observer';
   if (!consent) {
     return NextResponse.json(
       { error: 'You must agree to the recording notice to take part.' },
@@ -77,6 +77,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (session.status === 'ended') {
     return NextResponse.json({ error: 'That activity has ended.' }, { status: 410 });
   }
+
+  // Groups are per-session, so this can only be checked once the session is
+  // loaded. Anything unrecognised becomes an observer rather than an error: a
+  // stale tab holding a group that the professor has since renamed should still
+  // let its owner in, just without a side.
+  if (team !== OBSERVER && !session.teams.some((t) => t.id === team)) team = OBSERVER;
 
   // Resume the same seat if this device already joined this session.
   const existing = await readParticipantToken(req.cookies.get(PARTICIPANT_COOKIE)?.value);

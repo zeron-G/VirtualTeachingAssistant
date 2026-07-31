@@ -28,6 +28,7 @@ export function Room({
   ended,
   resumeParticipantId = null,
   ticket = '',
+  ticketValid = false,
   requireTicket = false,
   teams,
 }: {
@@ -39,6 +40,8 @@ export function Room({
   resumeParticipantId?: string | null;
   /** Rotating check-in ticket from the QR (`?t=`). */
   ticket?: string;
+  /** Whether the server accepted that ticket — a forged `?t=` is not a check-in. */
+  ticketValid?: boolean;
   requireTicket?: boolean;
   /** The 2-4 groups configured for this discussion. */
   teams: { id: string; label: string; color: string }[];
@@ -93,7 +96,7 @@ export function Room({
           <h1>Join the discussion</h1>
           <p className="sub">{topic}</p>
 
-          {requireTicket && ticket === '' && (
+          {requireTicket && !ticketValid && (
             <p className="error" style={{ marginTop: 0 }}>
               Scan the QR code on the screen to check in — it changes every 30 seconds, so a
               screenshot or a typed code won&apos;t work.
